@@ -345,28 +345,23 @@ struct StatusView: View {
     private func steamRow(_ deployment: SteamDeployment, payload: PayloadState) -> some View {
         switch deployment {
         case .steamMissing:
-            StatusRow(title: "NotProton", value: "Steam not found.", tone: .bad)
+            StatusRow(title: "NotProton", tone: .bad)
         case .notInstalled:
             StatusRow(
                 title: "NotProton",
-                value: "Not installed.",
                 tone: .neutral,
                 action: installAction(prominent: true)
             )
-        case .installed(let version):
+        case .installed:
             if payload.isComplete {
                 StatusRow(
                     title: "NotProton",
-                    value: "Installed" + (version.map { " (\($0))" } ?? ""),
                     tone: .ok
                 )
             } else {
                 StatusRow(
                     title: "NotProton",
-                    value: "Installed, but not for this account.",
                     tone: .warning,
-                    detail: "Steam is set up for NotProton, but this account is missing its "
-                        + "components. Install to add them.",
                     action: installAction(prominent: true)
                 )
             }
@@ -379,9 +374,7 @@ struct StatusView: View {
         case .foreign:
             StatusRow(
                 title: "NotProton",
-                value: "Another dylib is present.",
-                tone: .warning,
-                detail: "Repair your Steam install before installing NotProton."
+                tone: .warning
             )
         }
     }
