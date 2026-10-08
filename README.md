@@ -1,4 +1,4 @@
-# NotProton
+# NotProtonSequoia, an Unofficial macOS 15 Fork
 
 > **Save-data warning:** Prefix creation/rebuilding and Steam Cloud save synchronization
 > have not been fully tested on Sequoia. Incorrect save paths or newly created saves
