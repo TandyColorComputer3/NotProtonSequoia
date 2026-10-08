@@ -483,7 +483,8 @@ app-payload: $(TARGET) $(OVERLAY_SHIM) $(ICONMAKER) $(APPINFO)
 	@echo "==> Staged app payload in $(APP_PAYLOAD)"
 
 APP_BUNDLE  := $(OUT_DIR)/NotProton.app
-APP_BUNDLE_PAYLOAD := $(APP_BUNDLE)/Contents/Resources/NotProtonApp_NotProtonApp.bundle/payload
+APP_RESOURCE_BUNDLE := $(APP_BUNDLE)/Contents/Resources/NotProtonApp_NotProtonApp.bundle
+APP_BUNDLE_PAYLOAD := $(APP_RESOURCE_BUNDLE)/payload
 APP_ZIP     := $(OUT_DIR)/NotProton.zip
 APP_VERSION := $(shell sed -n 's/^\#define NOTPROTON_VERSION "\(.*\)"/\1/p' dylib/version.h)
 
@@ -551,6 +552,10 @@ app: app-payload $(OUT_DIR)/NotProton.icns
 		echo "==> rm -rf app/.build/out and build again" >&2; \
 		exit 1; \
 	fi
+	@test -d "$(APP_RESOURCE_BUNDLE)" || { \
+		echo "==> SwiftPM resource bundle is missing from Contents/Resources" >&2; \
+		exit 1; \
+	}
 	@echo "==> Payload complete in the bundle"
 	codesign -f -s "$(APP_SIGN_ID)" "$(APP_BUNDLE)"
 	codesign --verify --strict "$(APP_BUNDLE)"
