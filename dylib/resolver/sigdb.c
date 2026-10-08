@@ -92,6 +92,33 @@ static int load_call_path(cJSON *obj, np_anchor_t *a) {
     return 0;
 }
 
+static int load_calls(cJSON *obj, np_anchor_t *a) {
+    cJSON *arr = cJSON_GetObjectItem(obj, "calls");
+    if (!arr || !cJSON_IsArray(arr)) return -1;
+
+    int n = cJSON_GetArraySize(arr);
+    if (n < 1 || n > NP_CALLS_MAX) return -1;
+
+    for (int i = 0; i < n; i++) {
+        cJSON *e = cJSON_GetArrayItem(arr, i);
+        if (!e || !cJSON_IsString(e) || !e->valuestring) return -1;
+
+        size_t len = strlen(e->valuestring);
+        if (len == 0 || len >= NP_CALL_NAME_MAX) return -1;
+        if (len == 1 && e->valuestring[0] == NP_SELECTOR_MARK) return -1;
+
+        snprintf(a->calls[i], NP_CALL_NAME_MAX, "%s", e->valuestring);
+    }
+    a->call_count = n;
+
+    cJSON *exact = cJSON_GetObjectItem(obj, "exact");
+    a->calls_exact = (exact && cJSON_IsTrue(exact)) ? 1 : 0;
+
+    cJSON *bare = cJSON_GetObjectItem(obj, "no_data_refs");
+    a->no_data_refs = (bare && cJSON_IsTrue(bare)) ? 1 : 0;
+    return 0;
+}
+
 static void load_anchor(cJSON *sig_obj, np_anchor_t *a) {
     cJSON *obj = cJSON_GetObjectItem(sig_obj, "anchor");
     if (!obj || !cJSON_IsObject(obj)) return;
@@ -133,6 +160,14 @@ static void load_anchor(cJSON *sig_obj, np_anchor_t *a) {
         }
         a->kind = NP_MATCH_VTABLE_SLOT;
         return;                         // refinements below are string-only
+    } else if (strcmp(ks, "calls") == 0) {
+        if (load_calls(obj, a) != 0) {
+            NP_WARN("sigdb: a calls anchor has no usable call list; ignoring it");
+            a->kind = NP_MATCH_NONE;
+            return;
+        }
+        a->kind = NP_MATCH_CALLS;
+        return;
     } else if (strcmp(ks, "aob") == 0) {
         a->kind = NP_MATCH_AOB;
         return;
@@ -208,8 +243,15 @@ int np_load_profile(const char *path, np_sigdb_t *out) {
 
             if ((v = cJSON_GetObjectItem(elem, "deprecated")))
                 e->deprecated = cJSON_IsTrue(v);
-            if ((v = cJSON_GetObjectItem(elem, "match_offset")))
-                e->match_offset = (int32_t)v->valueint;
+            if ((v = cJSON_GetObjectItem(elem, "match_offset"))) {
+                if (cJSON_IsNumber(v)) {
+                    e->match_offset = (int32_t)v->valueint;
+                } else {
+                    NP_WARN("sigdb: '%s' has a non-numeric match_offset; dropping "
+                            "its byte pattern", e->name);
+                    e->aob_hex[0] = '\0';
+                }
+            }
 
             load_anchor(elem, &e->anchor);
 

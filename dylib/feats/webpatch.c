@@ -272,11 +272,27 @@ static int has_suffix(const char *s, const char *suf) {
     return ls >= lf && memcmp(s + ls - lf, suf, lf) == 0;
 }
 
+static const char *inside_steamui(const char *path) {
+    const char *at = strstr(path, "/steamui/");
+    if (at)
+        return at + sizeof("/steamui/") - 1;
+    if (strncmp(path, "steamui/", sizeof("steamui/") - 1) == 0)
+        return path + sizeof("steamui/") - 1;
+    return NULL;
+}
+
+// The compatibility UI has shipped in both chunk~*.js and sp.js.
+// np_webpatch_transform rejects scripts without matching anchors.
 int np_webpatch_should_patch(const char *path) {
-    return path
-        && strstr(path, "steamui") != NULL
-        && strstr(path, "/chunk~") != NULL
-        && has_suffix(path, ".js");
+    if (!path || !has_suffix(path, ".js"))
+        return 0;
+
+    const char *rest = inside_steamui(path);
+    if (!rest)
+        return 0;
+
+    return strncmp(rest, "localization/", sizeof("localization/") - 1) != 0
+        && strncmp(rest, "libraries/", sizeof("libraries/") - 1) != 0;
 }
 
 char *np_webpatch_transform(const uint8_t *src, size_t src_len, size_t *out_len,

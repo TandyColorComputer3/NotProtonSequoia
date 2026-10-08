@@ -8,6 +8,7 @@
 extern int np_log_level;
 extern FILE *np_log_file;
 void np_log_init(void);
+void np_log_attach(void);
 
 enum {
     NP_LVL_ERR = 0,

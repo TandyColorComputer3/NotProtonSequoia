@@ -56,7 +56,7 @@ struct PrefixToolsTests {
                 .appending(path: "notproton-layout-\(UUID().uuidString)")
             defer { try? fm.removeItem(at: runner) }
 
-            for path in ["lib/wine/\(arch)/\(loaderTail)", "CrossOver-Hosted Application/\(serverName)"] {
+            for path in ["lib/wine/\(arch)/\(loaderTail)", "bin/\(serverName)"] {
                 let file = runner.appending(path: path)
                 try fm.createDirectory(
                     at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -67,7 +67,7 @@ struct PrefixToolsTests {
 
             let layout = PrefixTools.layout(runner: runner)
             #expect(layout.loader == runner.appending(path: "lib/wine/\(arch)/\(loaderTail)"))
-            #expect(layout.server == runner.appending(path: "CrossOver-Hosted Application/\(serverName)"))
+            #expect(layout.server == runner.appending(path: "bin/\(serverName)"))
 
             // The shapes the script reaches for, which is what would drift independently.
             #expect(source.contains("$wine_unix/\(loaderTail)"))
@@ -293,7 +293,7 @@ struct PrefixToolsTests {
             let runner = FileManager.default.temporaryDirectory
                 .appending(path: "np-arch-\(UUID().uuidString)")
             defer { try? fm.removeItem(at: runner) }
-            for path in ["lib/wine/\(arch)/\(loaderTail)", "CrossOver-Hosted Application/\(serverName)"] {
+            for path in ["lib/wine/\(arch)/\(loaderTail)", "bin/\(serverName)"] {
                 let file = runner.appending(path: path)
                 try fm.createDirectory(
                     at: file.deletingLastPathComponent(), withIntermediateDirectories: true)

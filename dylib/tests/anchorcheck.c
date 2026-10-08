@@ -97,20 +97,7 @@ static int load_image(const char *module) {
 // pattern was recorded from.
 static uintptr_t resolve_by_aob(np_sig_entry_t *sig,
                                 uintptr_t text, size_t text_sz) {
-    if (!sig->aob_hex[0]) return 0;
-
-    np_byte_pattern_t pat;
-    if (np_compile_pattern(sig->aob_hex, &pat) != 0) return 0;
-    uintptr_t addr = np_scan_sole_match(text, text_sz, &pat);
-    np_release_pattern(&pat);
-    if (!addr) return 0;
-
-    if (sig->match_offset) {
-        uintptr_t adj = addr - (uintptr_t)sig->match_offset;
-        if (adj < text || adj >= text + text_sz) return 0;
-        addr = adj;
-    }
-    return addr;
+    return np_aob_site(sig, text, text_sz);
 }
 
 static const char *kind_name(np_match_kind_t k) {
@@ -121,6 +108,7 @@ static const char *kind_name(np_match_kind_t k) {
         case NP_MATCH_INSN_PAIR_IN_FN:   return "insn_pair";
         case NP_MATCH_AOB:               return "aob";
         case NP_MATCH_CALL_TARGET:       return "call_target";
+        case NP_MATCH_CALLS:             return "calls";
         default:                          return "none";
     }
 }
@@ -162,6 +150,15 @@ static const struct { uint64_t build; const char *type_name; uintptr_t vptr; } e
     {1789086785, "40CCompatManager_SpecifyCompatTool_Request",     0x16ad2c0},
     {1789086785, "41CCompatManager_SpecifyCompatTool_Response",    0x16ad370},
     {1789086785, "40CCompatManager_StateChanged_Notification",     0x16ad420},
+
+    {1790904859, "14CCompatManager",                              0x1743d20},
+    {1790904859, "21CMsgCompatManagerTool",                       0x16acff0},
+    {1790904859, "22CMsgCompatManagerAlias",                      0x16ad0a0},
+    {1790904859, "37CCompatManager_GetCompatTools_Request",        0x16ad150},
+    {1790904859, "38CCompatManager_GetCompatTools_Response",       0x16ad200},
+    {1790904859, "40CCompatManager_SpecifyCompatTool_Request",     0x16ad2b0},
+    {1790904859, "41CCompatManager_SpecifyCompatTool_Response",    0x16ad360},
+    {1790904859, "40CCompatManager_StateChanged_Notification",     0x16ad410},
 };
 
 static int run_rtti(const struct mach_header_64 *mh, intptr_t slide,
@@ -269,6 +266,53 @@ static int check_db(dbcheck_t *db) {
     return 0;
 }
 
+static int check_aob_fallback(const char *path) {
+    np_sigdb_t db = {0};
+    if (np_load_profile(path, &db) != 0) {
+        fprintf(stderr, "cannot reload sigdb '%s'\n", path);
+        return 1;
+    }
+    for (int i = 0; i < db.sig_count; i++) {
+        db.signatures[i].anchor.str[0]      = '\001';
+        db.signatures[i].anchor.str[1]      = '\0';
+        db.signatures[i].anchor.va          = 0;
+        db.signatures[i].anchor.calls[0][0] = '\001';
+    }
+
+    int bad = 0, checked = 0;
+    printf("byte-pattern fallback with every anchor forced to miss\n");
+    for (int m = 0; m < g_image_count; m++) {
+        np_resolve_result_t res = {0};
+        np_resolve_signatures(g_images[m].mh, g_images[m].slide, &db,
+                              g_images[m].module, &res);
+
+        for (int i = 0; i < db.sig_count; i++) {
+            np_sig_entry_t *sig = &db.signatures[i];
+            if (strcmp(sig->module, g_images[m].module) != 0) continue;
+            if (sig->deprecated || !sig->aob_hex[0] || !sig->func_addr_this_build) continue;
+
+            uintptr_t got  = np_lookup_address(&res, sig->name);
+            uintptr_t want = sig->func_addr_this_build + (uintptr_t)g_images[m].slide;
+            checked++;
+            if (!got) {
+                printf("  %-56s recorded=0x%-9lx  PATTERN DID NOT RESOLVE\n",
+                       sig->name, (unsigned long)sig->func_addr_this_build);
+                bad++;
+            } else if (got != want) {
+                printf("  %-56s aob=0x%-9lx recorded=0x%-9lx  WRONG ADDRESS\n",
+                       sig->name, (unsigned long)(got - (uintptr_t)g_images[m].slide),
+                       (unsigned long)sig->func_addr_this_build);
+                bad++;
+            }
+        }
+        np_free_resolution(&res);
+    }
+    printf("  %d signatures with a pattern and a recorded address, %d wrong\n\n",
+           checked, bad);
+    np_free_profile(&db);
+    return bad;
+}
+
 // The database whose recorded addresses the anchors actually landed on describes
 // the running client. Nothing in the app bundle reports the client build, so it
 // has to be recognised rather than read.
@@ -283,7 +327,7 @@ static int pick_live(const dbcheck_t *dbs, int n) {
     return best_hits ? best : -1;
 }
 
-static int report_db(const dbcheck_t *db, int is_live) {
+static int report_db(const dbcheck_t *db, int is_live, int misses_excused) {
     int bad = 0;
 
     printf("%s  build %llu%s\n", db->path, (unsigned long long)db->build,
@@ -295,9 +339,9 @@ static int report_db(const dbcheck_t *db, int is_live) {
 
         if (r->kind == NP_MATCH_NONE)          { verdict = "NO ANCHOR";     bad++; }
         else if (!r->anchor)                   { verdict = (r->has_pattern && r->aob)
-                                                             ? "anchor failed, aob resolves"
-                                                             : "UNRESOLVED";
-                                                 if (!(r->has_pattern && r->aob)) bad++; }
+                                                             ? "ANCHOR FAILED (aob resolves)"
+                                                             : "ANCHOR FAILED";
+                                                 if (!misses_excused) bad++; }
         else if (!is_live)                     { verdict = (r->has_pattern && r->aob && r->aob != r->anchor)
                                                              ? "stale pattern hit elsewhere"
                                                              : "resolved";           }
@@ -375,8 +419,13 @@ int main(int argc, char **argv) {
             return 2;
         }
         dbs[i].loaded = 1;
-        for (int j = 0; j < dbs[i].sigdb.sig_count; j++)
-            if (load_image(dbs[i].sigdb.signatures[j].module) != 0) return 3;
+        for (int j = 0; j < dbs[i].sigdb.sig_count; j++) {
+            const char *mod = dbs[i].sigdb.signatures[j].module;
+            if (load_image(mod) == 0) continue;
+            fprintf(stderr, "sigdb '%s' names module '%s', which will not load\n",
+                    dbs[i].path, mod);
+            return strcmp(mod, NP_MODULE_DEFAULT) == 0 ? 3 : 2;
+        }
     }
     for (int i = 0; i < n; i++) {
         if (check_db(&dbs[i]) != 0) return 2;
@@ -385,7 +434,7 @@ int main(int argc, char **argv) {
     int live = pick_live(dbs, n);
 
     int bad = 0;
-    for (int i = 0; i < n; i++) bad += report_db(&dbs[i], i == live);
+    for (int i = 0; i < n; i++) bad += report_db(&dbs[i], i == live, live >= 0 && i != live);
     bad += report_cross_db(dbs, n);
 
     if (live < 0) {
@@ -395,6 +444,7 @@ int main(int argc, char **argv) {
     } else {
         const image_t *sc = image_for(NP_MODULE_DEFAULT);
         bad += run_rtti(sc->mh, sc->slide, sc->text, sc->text_sz, dbs[live].build);
+        bad += check_aob_fallback(dbs[live].path);
     }
 
     for (int i = 0; i < n; i++) {

@@ -16,6 +16,9 @@ private struct StubPE {
     static let bssVirtualAddress = 0x200
     static let bssSize = 0x200
 
+    static let imageSize = sectionVirtualAddress + sectionSize
+    static let tableEnd = peOffset + 24 + 0xf0 + 2 * 40
+
     static func rva(forOffset offset: Int) -> Int {
         sectionVirtualAddress + (offset - sectionRawOffset)
     }
@@ -31,6 +34,10 @@ private struct StubPE {
         write(&bytes, peOffset + 6, UInt16(2))
         write(&bytes, peOffset + 20, optionalSize)
         write(&bytes, peOffset + 24, magic)
+
+        write(&bytes, peOffset + 24 + 36, UInt32(0x200))
+        write(&bytes, peOffset + 24 + 56, UInt32(imageSize))
+        write(&bytes, peOffset + 24 + 60, UInt32(sectionRawOffset))
 
         if magic == 0x20b {
             write(&bytes, peOffset + 24 + 24, imageBase)
@@ -113,12 +120,75 @@ struct NtdllPatcherTests {
         #expect(Array(result[(hookOffset + 5) ..< (hookOffset + stolen.count)]) == [0xcc, 0xcc, 0xcc, 0xcc])
     }
 
-    @Test("The file keeps its length, because a PE cannot absorb inserted bytes")
+    @Test("A padding cave keeps the file length, because a PE cannot absorb inserted bytes")
     func patchDoesNotResize() throws {
         let patch = stubPatch()
         let image = stubImage()
         let result = try NtdllPatcher.apply(patch, to: image, payload: Data(repeating: 0x90, count: 64))
         #expect(result.count == image.count)
+    }
+
+    private func sectionPatch() -> NtdllPatch {
+        let base = stubPatch()
+        return NtdllPatch(
+            arch: base.arch, payloadResource: base.payloadResource, payloadSHA256: base.payloadSHA256,
+            caveRVA: StubPE.imageSize, payloadRVA: StubPE.imageSize, hooks: base.hooks,
+            caveSize: 0x1000, cavePad: 0, machine: base.machine, magic: base.magic,
+            imageBase: base.imageBase, placement: .section
+        )
+    }
+
+    private func u32(_ bytes: [UInt8], _ offset: Int) -> Int {
+        bytes[offset ..< offset + 4].reversed().reduce(0) { $0 << 8 | Int($1) }
+    }
+
+    @Test("A section cave appends one executable page and jumps into it")
+    func sectionPlacementAppendsPage() throws {
+        let patch = sectionPatch()
+        let image = stubImage()
+        let payload = Data([0x90, 0x91, 0x92, 0x93])
+        let result = [UInt8](try NtdllPatcher.apply(patch, to: image, payload: payload))
+
+        #expect(result.count == image.count + 0x1000)
+        #expect(result[StubPE.peOffset + 6] == 3)
+        #expect(u32(result, StubPE.peOffset + 24 + 56) == StubPE.imageSize + 0x1000)
+
+        let header = StubPE.tableEnd
+        #expect(Array(result[header ..< header + 8]) == Array(".npdet".utf8) + [0, 0])
+        #expect(u32(result, header + 8) == 0x1000)
+        #expect(u32(result, header + 12) == StubPE.imageSize)
+        #expect(u32(result, header + 16) == 0x1000)
+        #expect(u32(result, header + 20) == image.count)
+        #expect(u32(result, header + 36) == 0x6000_0020)
+        #expect(Array(result[image.count ..< image.count + 4]) == [0x90, 0x91, 0x92, 0x93])
+
+        let hookOffset = StubPE.sectionRawOffset + 0x100
+        #expect(result[hookOffset] == 0xe9)
+        #expect(Int(Int32(truncatingIfNeeded: u32(result, hookOffset + 1)))
+            == patch.payloadRVA - (patch.hooks[0].rva + 5))
+    }
+
+    @Test("A section cave pinned somewhere other than the image end is refused")
+    func sectionPlacementNeedsImageEnd() throws {
+        let base = sectionPatch()
+        let moved = NtdllPatch(
+            arch: base.arch, payloadResource: base.payloadResource, payloadSHA256: base.payloadSHA256,
+            caveRVA: base.caveRVA + 0x1000, payloadRVA: base.caveRVA + 0x1000, hooks: base.hooks,
+            caveSize: base.caveSize, cavePad: 0, machine: base.machine, magic: base.magic,
+            imageBase: base.imageBase, placement: .section
+        )
+        #expect(throws: StepFailure.self) {
+            try NtdllPatcher.apply(moved, to: stubImage(), payload: Data([0x90]))
+        }
+    }
+
+    @Test("A section cave with no free header slot is refused, so a second patch cannot stack")
+    func sectionPlacementNeedsFreeHeader() throws {
+        var bytes = [UInt8](stubImage())
+        bytes[StubPE.tableEnd] = 0x2e
+        #expect(throws: StepFailure.self) {
+            try NtdllPatcher.apply(sectionPatch(), to: Data(bytes), payload: Data([0x90]))
+        }
     }
 
     // MARK: - Refusals

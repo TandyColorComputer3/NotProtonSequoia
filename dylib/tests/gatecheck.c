@@ -49,6 +49,34 @@ static void check_gate(const char *nm, size_t i, const np_gate_t *a,
     }
 }
 
+static void check_paths(void) {
+    static const struct { const char *path; int want; } cases[] = {
+        { "/Steam.AppBundle/Steam/Contents/MacOS/steamui/sp.js",                   1 },
+        { "/Steam.AppBundle/Steam/Contents/MacOS/steamui/chunk~2dcc5aaf7.js",      1 },
+        { "/Steam.AppBundle/Steam/Contents/MacOS/steamui/1129.js",                 1 },
+        { "/Steam.AppBundle/Steam/Contents/MacOS/steamui/library.js",              1 },
+        { "steamui/sp.js",                                                         1 },
+        { "/Steam.AppBundle/Steam/Contents/MacOS/steamui/app/sp.js",               1 },
+        { "/Steam.AppBundle/Steam/Contents/MacOS/steamui/localization/en-json.js", 0 },
+        { "/Steam.AppBundle/Steam/Contents/MacOS/steamui/libraries/lib~00299.js",  0 },
+        { "/Steam.AppBundle/Steam/Contents/MacOS/steamui/sp.js.orig",              0 },
+        { "/Steam.AppBundle/Steam/Contents/MacOS/steamui/css/library.css",         0 },
+        { "/Steam.AppBundle/Steam/Contents/MacOS/notsteamui/sp.js",                0 },
+        { "/Steam.AppBundle/Steam/Contents/MacOS/steamui",                         0 },
+        { "sp.js",                                                                 0 },
+    };
+    size_t n = sizeof(cases) / sizeof(cases[0]);
+    for (size_t i = 0; i < n; i++) {
+        int got = np_webpatch_should_patch(cases[i].path);
+        if (!got != !cases[i].want)
+            wrong("should_patch(%s) answered %d, wanted %d",
+                  cases[i].path, got, cases[i].want);
+    }
+    if (np_webpatch_should_patch(NULL))
+        wrong("should_patch(NULL) answered yes");
+    printf("%zu chunk paths checked\n", n + 1);
+}
+
 static void selfcheck(void) {
     size_t total = 0;
     for (size_t sh = 0; sh < NP_SHAPE_COUNT; sh++) {
@@ -77,6 +105,7 @@ static void selfcheck(void) {
 
     printf("%zu shapes, %zu gates, %zu fixes checked\n",
            NP_SHAPE_COUNT, total, NP_FIX_COUNT);
+    check_paths();
 }
 
 static uint8_t *slurp(const char *path, size_t *len) {

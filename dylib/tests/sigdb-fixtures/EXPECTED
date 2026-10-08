@@ -9,6 +9,18 @@
 
 1 all_deprecated.json
 0 array_root.json
+1 calls_bare_mark.json
+1 calls_empty.json
+1 calls_long_name.json
+1 calls_missing.json
+1 calls_no_such_import.json
+1 calls_no_such_selector.json
+1 calls_not_strings.json
+0 calls_real_import.json
+0 calls_real_selector.json
+1 calls_scalar.json
+1 calls_too_common.json
+1 calls_too_many.json
 1 deep_nest.json
 2 empty_file.json
 0 empty_sigs.json

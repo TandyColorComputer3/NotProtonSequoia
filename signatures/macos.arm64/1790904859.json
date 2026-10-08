@@ -3,42 +3,39 @@
   "profile_version": 1,
   "arch": "arm64",
   "platform": "macos",
-  "steam_build": 1788400362,
+  "steam_build": 1790904859,
   "steam_build_date": "",
   "signatures": [
     {
       "name": "CCompatManager::Init",
-      "aob_hex": "?? ?? ?? D1 FC 6F 0B A9 FA 67 0C A9 F8 5F 0D A9 F6 57 0E A9 F4 4F 0F A9 FD 7B 10 A9 FD 03 04 91 F4 03 01 AA F3 03 00 AA ?? ?? ?? ?? 08 A9 40 F9 08 01 40 F9 ?? ?? ?? ?? 29 01 28 91 A8 03 1A F8 09 00 00 F9 F9 03 00 AA 3F 8F 00 F8 1F 08 00 F9",
-      "func_addr_this_build": "0x690f6c",
+      "aob_hex": "FF C3 04 D1 FC 6F 0D A9 FA 67 0E A9 F8 5F 0F A9 F6 57 10 A9 F4 4F 11 A9 FD 7B 12 A9 FD 83 04 91 F6 03 01 AA",
       "anchor": {
         "kind": "string",
         "value": "STEAM_COMPAT_TOOL_MAPPINGS"
-      }
+      },
+      "func_addr_this_build": "0x6a0e50"
     },
     {
       "name": "CCompatManager::BIsCompatibilityToolEnabled",
-      "aob_hex": "FF 03 01 D1 F4 4F 02 A9 FD 7B 03 A9 ?? ?? ?? ?? F4 03 01 AA F3 03 00 AA E1 17 00 B9 ?? ?? ?? ?? 08 0D 40 F9 08 01 40 B9 E8 00 00 34 ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 81 00 80 52 ?? ?? ?? ??",
-      "func_addr_this_build": "0x6962f0",
+      "aob_hex": "FF 03 01 D1 F4 4F 02 A9 FD 7B 03 A9 FD C3 00 91 F4 03 01 AA F3 03 00 AA E1 17 00 B9 ?? ?? ?? ??",
       "anchor": {
         "kind": "string",
         "value": "CCompatManager::BIsCompatibilityToolEnabled"
-      }
+      },
+      "func_addr_this_build": "0x6a56e0"
     },
     {
       "name": "CCompatManager::YldRegisterTool",
-      "aob_hex": "88 3E 40 F9 1F 01 00 F1 56 03 88 9A E0 03 16 AA ?? ?? ?? 94 E8 03 00 AA 89 22 40 F9 3F 01 00 F1 40 03 89 9A 88 00 00 34",
-      "func_addr_this_build": "0x699f00",
-      "match_offset": 168,
+      "aob_hex": "FF 43 02 D1 FC 6F 03 A9 FA 67 04 A9 F8 5F 05 A9 F6 57 06 A9 F4 4F 07 A9 FD 7B 08 A9 FD 03 02 91 F4 03 01 AA F3 03 00 AA ?? ?? ?? ?? 08 15 40 F9",
       "anchor": {
         "kind": "string",
         "value": "CCompatManager::YldRegisterTool"
-      }
+      },
+      "func_addr_this_build": "0x6a97c4"
     },
     {
       "name": "CCompatManager::GetOSListOverrideForApp.oslist_gate",
-      "match_offset": -8,
-      "func_addr_this_build": "0x695ed0",
-      "aob_hex": "E0 03 14 AA ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? A8 3A 40 F9 1F 01 00 F1 C8 02 88 9A 68 02 00 F9 33 00 80 52",
+      "aob_hex": "?? ?? ?? ?? ?? ?? ?? ?? 09 30 97 52 E9 05 A0 72 CA 22 40 B9 ?? ?? ?? ?? 08 61 14 91 5F 01 09 6B",
       "anchor": {
         "kind": "insn_pair_in_fn",
         "value": "pTool != nullptr",
@@ -51,13 +48,12 @@
           "tie_mask": "0x0",
           "land": "second"
         }
-      }
+      },
+      "func_addr_this_build": "0x6a52fc"
     },
     {
       "name": "CCompatManager::ResolveCompatToolForApp.local_redirect",
-      "match_offset": -8,
-      "func_addr_this_build": "0x695fc4",
-      "aob_hex": "80 02 40 F9 ?? ?? ?? ?? 01 60 40 B9 ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 08 01 40 F9 09 30 82 52 00 01 09 8B 02 00 80 52 ?? ?? ?? ??",
+      "aob_hex": "01 68 40 B9 ?? ?? ?? ?? ?? ?? ?? ?? 08 81 0D 91 08 01 40 F9 09 CC 82 52 00 01 09 8B 02 00 80 52",
       "anchor": {
         "kind": "insn_pair_in_fn",
         "value": "GetAppInstallDir failed for tool %u \"%s\"",
@@ -69,110 +65,109 @@
           "tie_mask": "0x1F",
           "land": "first"
         }
-      }
+      },
+      "func_addr_this_build": "0x6a53ec"
     },
     {
       "name": "CAppManager::TerminateProcessByPid",
-      "aob_hex": "F4 4F BE A9 FD 7B 01 A9 FD 43 00 91 F3 03 00 AA ?? ?? ?? ?? F4 03 00 AA ?? ?? ?? ?? 00 F9 45 F9 E2 03 13 AA ?? ?? ?? ?? ?? ?? ?? ?? F3 03 00 AA",
-      "func_addr_this_build": "0xd6f28",
+      "aob_hex": "F4 4F BE A9 FD 7B 01 A9 FD 43 00 91 F3 03 00 AA ?? ?? ?? ?? F4 03 00 AA ?? ?? ?? ?? 00 0D 46 F9 E2 03 13 AA ?? ?? ?? ?? ?? ?? ?? ?? F3 03 00 AA",
       "anchor": {
         "kind": "string",
         "value": "terminate",
         "indirect": true,
         "caller_hops": 1
-      }
+      },
+      "func_addr_this_build": "0xdd3fc"
     },
     {
       "name": "CCompatManager::FindToolForTargetApp",
-      "aob_hex": "FF 83 01 D1 F6 57 03 A9 F4 4F 04 A9 FD 7B 05 A9 FD 43 01 91 A1 C3 1D B8 08 C0 5E 39 1F 05 00 71 ?? ?? ?? ?? F4 03 01 AA F3 03 00 AA ?? ?? ?? ?? 08 21 38 91 15 01 40 F9 16 07 82 52 A0 02 16 8B ?? ?? ?? ?? A0 02 16 8B E1 03 14 AA ?? ?? ?? ??",
-      "func_addr_this_build": "0x69577c",
+      "aob_hex": "FF 43 01 D1 F6 57 02 A9 F4 4F 03 A9 FD 7B 04 A9 FD 03 01 91 E1 1F 00 B9 08 40 60 39 1F 05 00 71",
       "anchor": {
         "kind": "string",
         "value": "FindToolForTargetApp matched with itself - ignoring: %u %s"
-      }
+      },
+      "func_addr_this_build": "0x6a4de4"
     },
     {
       "name": "CCompatManager::GetValidPlatforms",
-      "aob_hex": "FF 03 01 D1 F6 57 01 A9 F4 4F 02 A9 FD 7B 03 A9 FD C3 00 91 F4 03 01 AA F6 03 00 AA ?? ?? ?? ?? 08 21 38 91 13 01 40 F9 15 07 82 52 60 02 15 8B ?? ?? ?? ?? 60 02 15 8B E1 03 14 AA 22 00 80 52 ?? ?? ?? ?? ?? ?? ?? ?? F5 03 00 AA ?? ?? ?? ??",
-      "func_addr_this_build": "0x69457c",
+      "aob_hex": "FF 03 01 D1 F6 57 01 A9 F4 4F 02 A9 FD 7B 03 A9 FD C3 00 91 F4 03 01 AA F6 03 00 AA ?? ?? ?? ??",
       "anchor": {
         "kind": "string",
         "value": "AppID %u does not advertise linux as a supported platform, but a linux specific depot is present.\n"
-      }
+      },
+      "func_addr_this_build": "0x6a3850"
     },
     {
       "name": "CWebUIJobDispatcher::RegisterHandler",
-      "func_addr_this_build": "0x8da10",
       "aob_hex": "FF C3 00 D1 F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 F4 03 01 AA F3 03 00 AA 28 00 40 F9 08 01 40 F9",
       "anchor": {
         "kind": "string",
         "value": "WebUI method '%s' has already been registered. Skipping duplicate registration"
-      }
+      },
+      "func_addr_this_build": "0x93e60"
     },
     {
       "name": "CWebUITransport::DispatchJob",
-      "func_addr_this_build": "0x8dc14",
       "aob_hex": "FF 43 07 D1 FC 6F 19 A9 F6 57 1A A9 F4 4F 1B A9 FD 7B 1C A9 FD 03 07 91 F4 03 01 AA F3 03 00 AA",
       "anchor": {
         "kind": "string",
         "value": "no handler for message: %s"
-      }
+      },
+      "func_addr_this_build": "0x94064"
     },
     {
       "name": "CWebUIMsgJob::SendResponse",
-      "func_addr_this_build": "0x8e0ec",
-      "aob_hex": "FF C3 00 D1 F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 F3 03 01 AA F4 03 00 AA 20 0C 40 F9 E0 06 00 B4",
+      "aob_hex": "FF C3 00 D1 F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 F3 03 01 AA F4 03 00 AA 20 0C 40 F9 ?? ?? ?? ??",
       "anchor": {
         "kind": "string",
         "value": "CWebUIMsgJob: failed to send response for job: %s",
         "nth_xref": 1
-      }
+      },
+      "func_addr_this_build": "0x9453c"
     },
     {
       "name": "CCompatManager::SetCompatToolMapping",
-      "func_addr_this_build": "0x6954cc",
-      "aob_hex": "00 45 80 52 BC A4 30 94 F6 03 00 AA E1 03 17 AA E2 03 18 AA",
-      "match_offset": 44,
+      "aob_hex": "F8 5F BC A9 F6 57 01 A9 F4 4F 02 A9 FD 7B 03 A9 FD C3 00 91 F3 03 04 AA F4 03 03 AA F5 03 02 AA F7 03 00 AA",
       "anchor": {
         "kind": "string",
         "value": "Software\\Valve\\Steam\\CompatToolMapping",
         "nth_xref": 1,
         "caller_hops": 1,
         "caller_tail": true
-      }
+      },
+      "func_addr_this_build": "0x6a4b34"
     },
     {
       "name": "CCompatManager::InternalSpecifyCompatTool",
-      "func_addr_this_build": "0x6946f0",
       "aob_hex": "FF 43 02 D1 FA 67 04 A9 F8 5F 05 A9 F6 57 06 A9 F4 4F 07 A9 FD 7B 08 A9 FD 03 02 91 F5 03 04 AA F6 03 03 AA",
       "anchor": {
         "kind": "string",
         "value": "CCompatManager::InternalSpecifyCompatTool"
-      }
+      },
+      "func_addr_this_build": "0x6a3cb4"
     },
     {
       "name": "CCompatManager::FindMapping",
-      "func_addr_this_build": "0x6944a8",
-      "aob_hex": "FF 83 00 D1 FD 7B 01 A9 FD 43 00 91 A1 C3 1F B8 E1 00 00 34 00 60 0E 91 A1 13 00 D1",
+      "aob_hex": "FF 83 00 D1 FD 7B 01 A9 FD 43 00 91 A1 C3 1F B8 ?? ?? ?? ?? 00 E0 0F 91 A1 13 00 D1 ?? ?? ?? ??",
       "anchor": {
         "kind": "string",
         "value": "FindMapping: Invalid unAppID == k_nAppIdAll, use GetWildcardMapping()."
-      }
+      },
+      "func_addr_this_build": "0x6a4fc4"
     },
     {
       "name": "CCompatManager::GetWildcardMapping",
-      "func_addr_this_build": "0x695a2c",
-      "aob_hex": "FF 43 01 D1 F6 57 02 A9 F4 4F 03 A9 FD 7B 04 A9 FD 03 01 91 E1 1F 00 B9 21 05 00 34",
+      "aob_hex": "FF 43 01 D1 F6 57 02 A9 F4 4F 03 A9 FD 7B 04 A9 FD 03 01 91 E1 1F 00 B9 ?? ?? ?? ?? F5 03 01 AA",
       "anchor": {
         "kind": "string",
         "value": "GetWildcardMapping: Invalid unAppID k_nAppIdAll"
-      }
+      },
+      "func_addr_this_build": "0x6a503c"
     },
     {
       "name": "steamui::ShortcutExtensionMatches",
       "module": "steamui.dylib",
-      "aob_hex": "F4 4F BE A9 FD 7B 01 A9 FD 43 00 91 F3 03 01 AA 00 00 40 F9 ?? ?? ?? ?? C0 00 00 B4 61 02 40 F9 02 00 B0 12 ?? ?? ?? ?? 1F 00 00 71 E0 17 9F 1A FD 7B 41 A9 F4 4F C2 A8 C0 03 5F D6",
-      "func_addr_this_build": "0x9ee44",
+      "aob_hex": "F4 4F BE A9 FD 7B 01 A9 FD 43 00 91 F3 03 01 AA 00 00 40 F9 ?? ?? ?? ?? ?? ?? ?? ?? 61 02 40 F9",
       "anchor": {
         "kind": "calls",
         "calls": [
@@ -181,13 +176,13 @@
         ],
         "exact": true,
         "no_data_refs": true
-      }
+      },
+      "func_addr_this_build": "0xa5478"
     },
     {
       "name": "steamui::ShortcutIconRender",
       "module": "steamui.dylib",
-      "aob_hex": "FF C3 01 D1 E9 23 02 6D F8 5F 03 A9 F6 57 04 A9 F4 4F 05 A9 FD 7B 06 A9 FD 83 01 91 F4 03 01 AA F5 03 00 AA ?? ?? ?? ??",
-      "func_addr_this_build": "0x9ef90",
+      "aob_hex": "FF C3 01 D1 E9 23 02 6D F8 5F 03 A9 F6 57 04 A9 F4 4F 05 A9 FD 7B 06 A9 FD 83 01 91 F4 03 01 AA",
       "anchor": {
         "kind": "calls",
         "calls": [
@@ -195,7 +190,8 @@
           "@iconForFile:",
           "@drawInRect:fromRect:operation:fraction:"
         ]
-      }
+      },
+      "func_addr_this_build": "0xa55fc"
     }
   ]
 }

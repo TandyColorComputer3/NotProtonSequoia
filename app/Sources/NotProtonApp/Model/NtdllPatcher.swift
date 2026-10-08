@@ -10,6 +10,11 @@ struct NtdllHook: Sendable {
     let stolen: [UInt8]
 }
 
+enum CavePlacement: Sendable {
+    case padding
+    case section
+}
+
 struct NtdllPatch: Sendable {
     let arch: WineArch
 
@@ -29,6 +34,8 @@ struct NtdllPatch: Sendable {
     let machine: UInt16
     let magic: UInt16
     let imageBase: UInt64
+
+    var placement: CavePlacement = .padding
 }
 
 enum NtdllPatcher {
@@ -36,6 +43,10 @@ enum NtdllPatcher {
     static let step = "Patch ntdll"
 
     private static let magicPE32Plus: UInt16 = 0x20b
+    // SECTION_NAME, SECTION_SIZE and SECTION_FLAGS in resolve.py.
+    private static let sectionName: [UInt8] = Array(".npdet".utf8) + [0, 0]
+    private static let sectionSize = 0x1000
+    private static let sectionFlags: UInt32 = 0x6000_0020
     private static let machineARM64: UInt16 = 0xaa64
 
 
@@ -107,6 +118,73 @@ enum NtdllPatcher {
                 imageBase: 0x1_8000_0000
             ),
         ],
+        "27.0.0.41069": [
+            NtdllPatch(
+                arch: .x86_64Windows,
+                payloadResource: "detour2-41069",
+                payloadSHA256: "67b70667387ff5bf89743b2d0a995a94543812678d4558dc884e6cebb46e7750",
+                caveRVA: 0x815e0,
+                payloadRVA: 0x815e0,
+                hooks: [
+                    NtdllHook(rva: 0x52055,
+                              stolen: [0x48, 0x83, 0xbc, 0x24, 0xf0, 0x00, 0x00, 0x00, 0x00]),
+                ],
+                caveSize: 2592,
+                cavePad: 0x00,
+                machine: 0x8664,
+                magic: 0x20b,
+                imageBase: 0x1_7000_0000
+            ),
+            NtdllPatch(
+                arch: .i386Windows,
+                payloadResource: "detour32-41069",
+                payloadSHA256: "3eaa5021add0c8e30e324d6b1a6392a32720f5f73596418a2086b7f8081eb1bd",
+                caveRVA: 0x7d1f0,
+                payloadRVA: 0x7d1f0,
+                hooks: [
+                    NtdllHook(rva: 0x4d848, stolen: [0xf6, 0x45, 0xbc, 0x02, 0x75, 0x26]),
+                ],
+                caveSize: 3600,
+                cavePad: 0x00,
+                machine: 0x14c,
+                magic: 0x10b,
+                imageBase: 0x7bc0_0000
+            ),
+        ],
+        "27.0.0.41069-fex": [
+            NtdllPatch(
+                arch: .i386Windows,
+                payloadResource: "detour32-fex-41069",
+                payloadSHA256: "6ff6c7289e639c4caad85c2670bfa849d9f36baa24152b6979896caede5e249b",
+                caveRVA: 0xa4000,
+                payloadRVA: 0xa4000,
+                hooks: [
+                    NtdllHook(rva: 0x2ede2, stolen: [0x8b, 0x45, 0x14, 0xa8, 0x02]),
+                ],
+                caveSize: 0x1000,
+                cavePad: 0x00,
+                machine: 0x14c,
+                magic: 0x10b,
+                imageBase: 0x7bc0_0000,
+                placement: .section
+            ),
+            NtdllPatch(
+                arch: .aarch64Windows,
+                payloadResource: "detour64-fex-41069",
+                payloadSHA256: "c6060b07f2c2f25636fcb1489ddd6729c277666167e9a090f55a1b711f0d5979",
+                caveRVA: 0xf3185,
+                payloadRVA: 0xf3190,
+                hooks: [
+                    NtdllHook(rva: 0x48738, stolen: [0x1f, 0x20, 0x03, 0xd5]),
+                    NtdllHook(rva: 0xa883c, stolen: [0x1f, 0x20, 0x03, 0xd5]),
+                ],
+                caveSize: 52859,
+                cavePad: 0xcc,
+                machine: 0xaa64,
+                magic: 0x20b,
+                imageBase: 0x1_8000_0000
+            ),
+        ],
     ]
 
     static func patches(for build: RunnerBuild) -> [NtdllPatch] {
@@ -121,6 +199,9 @@ enum NtdllPatcher {
     static func apply(_ patch: NtdllPatch, to image: Data, payload: Data) throws -> Data {
         var bytes = [UInt8](image)
         try validateHeaders(patch, bytes)
+        if patch.placement == .section {
+            try appendSection(patch, to: &bytes)
+        }
 
         let caveOffset = try fileOffset(of: patch.caveRVA, in: bytes, describing: "cave", patch: patch)
         let payloadOffset = try fileOffset(of: patch.payloadRVA, in: bytes, describing: "payload", patch: patch)
@@ -226,6 +307,59 @@ enum NtdllPatcher {
         return jump
     }
 
+
+    private static func appendSection(_ patch: NtdllPatch, to bytes: inout [UInt8]) throws {
+        let pe = Int(try u32(bytes, 0x3c))
+        let sections = Int(try u16(bytes, pe + 6))
+        let optional = pe + 24
+        let table = optional + Int(try u16(bytes, pe + 20))
+        let header = table + sections * 40
+        let fileAlignment = Int(try u32(bytes, optional + 36))
+        let imageSize = Int(try u32(bytes, optional + 56))
+        let headersSize = Int(try u32(bytes, optional + 60))
+
+        guard patch.caveSize == sectionSize, imageSize == patch.caveRVA else {
+            throw StepFailure(
+                step: step,
+                detail: "The \(patch.arch.rawValue) ntdll image ends at \(hex(imageSize)), and the detour "
+                    + "section was pinned at \(hex(patch.caveRVA))."
+            )
+        }
+        guard header + 40 <= headersSize, bytes[header ..< header + 40].allSatisfy({ $0 == 0 }) else {
+            throw StepFailure(
+                step: step,
+                detail: "The \(patch.arch.rawValue) ntdll has no free section header slot for the detour."
+            )
+        }
+        guard fileAlignment > 0, fileAlignment & (fileAlignment - 1) == 0 else {
+            throw StepFailure(
+                step: step,
+                detail: "The \(patch.arch.rawValue) ntdll file alignment \(hex(fileAlignment)) is not a power of two."
+            )
+        }
+
+        let rawOffset = (bytes.count + fileAlignment - 1) & ~(fileAlignment - 1)
+        // The last zero is NumberOfRelocations and NumberOfLinenumbers (two bytes each).
+        var entry = sectionName
+        for field in [UInt32(sectionSize), UInt32(patch.caveRVA), UInt32(sectionSize), UInt32(rawOffset),
+                      0, 0, 0, sectionFlags] {
+            withUnsafeBytes(of: field.littleEndian) { entry.append(contentsOf: $0) }
+        }
+        bytes.replaceSubrange(header ..< header + 40, with: entry)
+
+        put16(UInt16(sections + 1), at: pe + 6, in: &bytes)
+        put32(UInt32(imageSize + sectionSize), at: optional + 56, in: &bytes)
+        bytes.append(contentsOf: repeatElement(0, count: rawOffset + sectionSize - bytes.count))
+    }
+
+    private static func put16(_ value: UInt16, at offset: Int, in bytes: inout [UInt8]) {
+        bytes[offset] = UInt8(value & 0xff)
+        bytes[offset + 1] = UInt8(value >> 8)
+    }
+
+    private static func put32(_ value: UInt32, at offset: Int, in bytes: inout [UInt8]) {
+        for index in 0 ..< 4 { bytes[offset + index] = UInt8((value >> (8 * UInt32(index))) & 0xff) }
+    }
 
     private static func validateHeaders(_ patch: NtdllPatch, _ bytes: [UInt8]) throws {
         let pe = Int(try u32(bytes, 0x3c))

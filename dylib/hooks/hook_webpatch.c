@@ -100,15 +100,24 @@ static int spill_to_temp(const char *bytes, size_t len) {
 // the patched bytes. -1 falls the caller through to the real file, which happens
 // when the read fails or the gates are absent/missing. Safety.
 static int open_patched(const char *path) {
+    np_log_attach();
+
     int in = sys_open(path, O_RDONLY, 0);
     if (in < 0)
         return -1;
 
     size_t raw_len = 0;
     char *raw = drain_fd(in, &raw_len);
-    close(in);
-    if (!raw)
+    if (!raw) {
+        struct stat st;
+        if (fstat(in, &st) == 0 && st.st_size > WEBPATCH_MAX_CHUNK)
+            NP_ERR("webpatch: %s holds %lld bytes, past the %d byte ceiling, so the "
+                   "compat UI stays unpatched", path, (long long)st.st_size,
+                   WEBPATCH_MAX_CHUNK);
+        close(in);
         return -1;
+    }
+    close(in);
 
     size_t patched_len = 0;
     const char *shape = NULL;
@@ -127,10 +136,14 @@ static int open_patched(const char *path) {
 
     int fd = spill_to_temp(patched, patched_len);
     free(patched);
-    if (fd < 0)
+    if (fd < 0) {
+        NP_ERR("webpatch: patched %s but staging the bytes failed, so the client reads "
+               "the chunk Valve shipped", path);
         return -1;
+    }
 
-    NP_LOG_FIRST("webpatch: served patched compat chunk (%s)", path);
+    NP_LOG_FIRST("webpatch: served patched compat chunk (%s) to %s pid %d",
+                 path, getprogname(), getpid());
     return fd;
 }
 

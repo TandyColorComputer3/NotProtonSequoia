@@ -56,30 +56,24 @@ enum PrefixTools {
 
     static func layout(runner: URL = SupportPaths.currentRunner) -> WineLayout {
         let fm = FileManager.default
-        let hosted = runner.appending(path: "CrossOver-Hosted Application")
+        let bin = runner.appending(path: "bin")
         func executable(_ url: URL) -> Bool {
             fm.isExecutableFile(atPath: url.path(percentEncoded: false))
         }
 
-        // A normal win64 CrossOver bottle uses the x86_64 Unix Wine
-        // loader and wineserver-x86.  Do not select the FEX/ARM64 host
-        // merely because the Preview runtime contains aarch64-unix.
-        let unix = runner.appending(path: "lib/wine/x86_64-unix")
-        let x86Loader = unix.appending(path: "wine")
-        let x86Server = hosted.appending(path: "wineserver-x86")
-        if executable(x86Loader), executable(x86Server) {
-            return WineLayout(
-                loader: x86Loader,
-                server: x86Server,
-                unixDir: unix
-            )
+        let arm = runner.appending(path: "lib/wine/aarch64-unix")
+        let armLoader = arm.appending(path: "wine.app/Contents/MacOS/wine")
+        let armServer = bin.appending(path: "wineserver-arm64")
+        if executable(armLoader), executable(armServer) {
+            return WineLayout(loader: armLoader, server: armServer, unixDir: arm)
         }
 
-        let arm = runner.appending(path: "lib/wine/aarch64-unix")
+        let unix = runner.appending(path: "lib/wine/x86_64-unix")
+        let server = bin.appending(path: "wineserver")
         return WineLayout(
-            loader: arm.appending(path: "wine.app/Contents/MacOS/wine"),
-            server: hosted.appending(path: "wineserver-arm64"),
-            unixDir: arm
+            loader: unix.appending(path: "wine"),
+            server: executable(server) ? server : bin.appending(path: "wineserver-x86"),
+            unixDir: unix
         )
     }
 

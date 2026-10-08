@@ -6,9 +6,22 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from resolve import PE, resolve, shell_vars  # noqa: E402
+from resolve import PE, SECTION_FLAGS, SECTION_NAME, SECTION_SIZE, resolve, shell_vars  # noqa: E402
 
 DEFAULT_PAYLOAD = {0x8664: "detour2.bin", 0x14c: "detour32.bin", 0xaa64: "detour64-fex.bin"}
+
+
+def append_section(pe, d, r):
+    import struct
+    raw = r['rawOffset']
+    e = struct.unpack_from('<I', d, 0x3c)[0]
+    d[pe.table_end:pe.table_end + 40] = struct.pack(
+        '<8sIIIIIIHHI', SECTION_NAME, SECTION_SIZE, r['caveRVA'], SECTION_SIZE, raw,
+        0, 0, 0, 0, SECTION_FLAGS)
+    struct.pack_into('<H', d, e + 6, struct.unpack_from('<H', d, e + 6)[0] + 1)
+    struct.pack_into('<I', d, pe.opt + 56, r['caveRVA'] + SECTION_SIZE)
+    d.extend(b"\0" * (raw + SECTION_SIZE - len(d)))
+    return raw
 
 
 def main():
@@ -31,7 +44,10 @@ def main():
 
     pe = PE(src)
     d = bytearray(pe.d)
-    cave_off = pe.off(payload_rva)
+    if r['placement'] == 'section':
+        cave_off = append_section(pe, d, r)
+    else:
+        cave_off = pe.off(payload_rva)
 
     if any(b != fill for b in d[cave_off:cave_off + len(detour)]):
         raise SystemExit(f"cave at {cave_off:#x} is not {fill:#02x} pad for {len(detour)} bytes")

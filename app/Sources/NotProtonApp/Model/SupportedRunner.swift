@@ -66,6 +66,34 @@ enum SupportedRunners {
                 .aarch64Windows: "560939a0f6e58314fc9d79fe6f839dce2b181f829ae58dca195fa142fcf40f39",
             ]
         ),
+        RunnerBuild(
+            bundleVersion: "27.0.0.41069",
+            releaseVersion: "20261006",
+            flavor: nil,
+            loaderSHA256: "8286bfd0c6d2ae337e11784926d371a9f7ed7e8da870bd2f435c2bce8eb3c148",
+            cleanNtdll: [
+                .x86_64Windows: "5b388fd48823e905616432fba627eb48f68dc14383963bb213d55db3f691b1b9",
+                .i386Windows: "e7da2a712870222942ef27a80b3bf4fa70fc8545dd1a64bdc7f2fa24a38debc3",
+            ],
+            patchedNtdll: [
+                .x86_64Windows: "e744e9a24e4401acc5038b490ddd146e6e9485fccf74d3b113c56f3e5854a1e2",
+                .i386Windows: "0d8e3ebb57b3173f675eef5e3a0950052c592efa10a7a10193b0beb811b55ea5",
+            ]
+        ),
+        RunnerBuild(
+            bundleVersion: "27.0.0.41069",
+            releaseVersion: "20261006",
+            flavor: "fex",
+            loaderSHA256: "ef2b9a0ad185d8caa2960a97c135a75b8b85ca62425599e35cf672f787fba64c",
+            cleanNtdll: [
+                .i386Windows: "66b1a244a611795c59a93a9491d17f36c98cd8db9be495004a37864e0e5ed4a5",
+                .aarch64Windows: "77ca83b2e1a3a1242f9d2d8868328262b2bcfc3f59bacf8b9389ea7e797ea852",
+            ],
+            patchedNtdll: [
+                .i386Windows: "e16b0199db721a08201b1512476b9eff255624d2faf3696fa57ff74b1a54be5c",
+                .aarch64Windows: "89e4c9e7f0a0a60462c0231ec393168f8bdb04bc8ea1dc22211f25bf3ff2c6b3",
+            ]
+        ),
     ]
 
     static func build(loaderSHA256 hash: String) -> RunnerBuild? {

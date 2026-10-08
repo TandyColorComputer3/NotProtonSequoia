@@ -1,4 +1,4 @@
-// x86_64 ntdll.dll cave layout, link time only
+/* x86_64 ntdll.dll cave layout, link time only */
 SECTIONS {
   . = CAVE_VA;
   .cave : {

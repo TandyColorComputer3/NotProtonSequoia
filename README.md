@@ -6,7 +6,7 @@ This is done by forcibly enabling the Steam Play functionality in macOS Steam (w
 present and inert) as well as by porting some components of Valve's Proton to macOS.
 
 This tool is intended to be used with Steam Client 1788652215 or 1790121765 and **CrossOver Preview
-2026082**. Both the FEX build and the Rosetta build are supported. The Rosetta build is
+20261006 or 2026082**. Both the FEX build and the Rosetta build are supported. The Rosetta build is
 the recommended version, as the FEX one is an early state.
 
 The macOS app itself is located in the ```app``` folder. The core logic is in ```dylib```.
@@ -16,9 +16,8 @@ makes/places in the ```~/Library/Application Support/notproton/runners/``` folde
 lsteamclient is loaded.
 
 This release is coming several days past when I wanted to release it, so the
-documentation is quite sparse. Sorry about that, I'll improve it over the next day or
-two.
+documentation is quite sparse. Sorry about that, I'll improve it shortly.
 
 Please read NOTICE for license information.
 
-Please open issue reports with any issues. PRs are welcome and encouraged.
+Please open issue reports with any issues. PRs are welcome and encouraged. Contributions policy to come shortly.

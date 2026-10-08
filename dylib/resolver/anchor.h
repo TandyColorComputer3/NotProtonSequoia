@@ -16,9 +16,15 @@ typedef enum {
                                   // a string reference identifies
     NP_MATCH_AOB,
     NP_MATCH_CALL_TARGET,
+    NP_MATCH_CALLS,
 } np_match_kind_t;
 
 #define NP_CALL_PATH_MAX 4
+
+// Selectors use the NP_SELECTOR_MARK prefix.
+#define NP_CALLS_MAX      8
+#define NP_CALL_NAME_MAX  96
+#define NP_SELECTOR_MARK  '@'
 
 typedef struct {
     uint32_t first, first_mask;
@@ -49,6 +55,11 @@ typedef struct {
 
     int              call_path[NP_CALL_PATH_MAX];
     int              call_depth;
+
+    char             calls[NP_CALLS_MAX][NP_CALL_NAME_MAX];
+    int              call_count;
+    int              calls_exact;    // the body makes these calls and no others
+    int              no_data_refs;   // reject ADRP instructions
 } np_anchor_t;
 
 // Upper bound on a function body when scanning for a pair.

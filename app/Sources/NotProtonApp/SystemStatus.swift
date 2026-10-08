@@ -18,15 +18,18 @@ struct StatusSnapshot: Sendable {
     var steamRunning: Bool
     var updateBlocked: Bool
     var crossOver: [CrossOverInstall]
-    var crossOverLicense: CrossOverLicense.Status?
+    var crossOverLicense: [String: CrossOverLicense.Status] = [:]
     var runner: RunnerState
     var payload: PayloadState
     var installedRunners: [RunnerBuild] = []
+    var orphanedRunners: [String] = []
+    var damagedRunners: [String] = []
 
     static func capture(bundledVersion: String) -> StatusSnapshot {
         let installs = CrossOverSource.discover()
-        let license = installs.first(where: \.isUsable).map {
-            CrossOverLicense.check(crossOverRoot: $0.crossOverRoot)
+        var licenses: [String: CrossOverLicense.Status] = [:]
+        for install in installs where install.isUsable {
+            licenses[install.id] = CrossOverLicense.check(crossOverRoot: install.crossOverRoot)
         }
 
         let runner = RunnerStore.state()
@@ -36,12 +39,14 @@ struct StatusSnapshot: Sendable {
             steamRunning: SteamBundle.isRunning,
             updateBlocked: UpdateBlock.isPresent(),
             crossOver: installs,
-            crossOverLicense: license,
+            crossOverLicense: licenses,
             runner: runner,
             payload: PayloadInspector.inspect(
                 build: runner.buildIdentifier.flatMap(SupportedRunners.build(id:))
             ),
-            installedRunners: RunnerStore.installedBuilds()
+            installedRunners: RunnerStore.installedBuilds(),
+            orphanedRunners: RunnerStore.orphanedClones(),
+            damagedRunners: RunnerStore.damagedClones()
         )
     }
 }
@@ -57,7 +62,10 @@ final class SystemStatus {
     private(set) var failure: String?
     private(set) var failureRemedy: Remedy?
 
-    var isBusy: Bool { activity != nil }
+    private var runInFlight = false
+    private var checkingLicense = false
+
+    var isBusy: Bool { activity != nil || runInFlight || checkingLicense }
     var isIdle: Bool { !isBusy && !isRefreshing }
 
     enum Confirmation: Identifiable, Hashable {
@@ -65,6 +73,7 @@ final class SystemStatus {
         case blockUpdates
         case installUnlicensed
         case toolUnlicensed
+        case removeBuild
         case removeEverything
 
         var id: Self { self }
@@ -124,14 +133,46 @@ final class SystemStatus {
         snapshot?.crossOver.filter(\.isUsable) ?? []
     }
 
-    // The install a repair of the current tool copies from: the one it was cloned
-    // from when that is still around, so a recopy does not swap Rosetta for FEX.
-    var setupSource: CrossOverInstall? {
+    var crossOverRowsOfferSetUp: Bool {
+        let usable = usableCrossOvers
+        guard usable.count > 1 else { return false }
+        let installed = snapshot?.installedRunners ?? []
+        return usable.contains { install in
+            if case .supported(let build) = install.support { return !installed.contains(build) }
+            return false
+        }
+    }
+
+    struct AvailableBuild: Identifiable {
+        let install: CrossOverInstall
+        let build: RunnerBuild
+
+        var id: String { build.id }
+    }
+
+    var repairSource: CrossOverInstall? {
         let current = snapshot?.runner.buildIdentifier
         return usableCrossOvers.first { install in
             if case .supported(let build) = install.support { return build.id == current }
             return false
-        } ?? usableCrossOver
+        }
+    }
+
+    var setupSource: CrossOverInstall? { repairSource ?? usableCrossOver }
+
+    var setupSourceIsDeployed: Bool {
+        guard case .supported(let build)? = setupSource?.support else { return false }
+        return snapshot?.installedRunners.contains(build) ?? false
+    }
+
+    var availableBuilds: [AvailableBuild] {
+        let installed = snapshot?.installedRunners ?? []
+        guard !installed.isEmpty else { return [] }
+        return usableCrossOvers.compactMap { install in
+            guard case .supported(let build) = install.support,
+                  !installed.contains(build) else { return nil }
+            return AvailableBuild(install: install, build: build)
+        }
     }
 
     func checkLicense(for chosen: CrossOverInstall? = nil) async -> CrossOverLicense.Status? {
@@ -139,7 +180,7 @@ final class SystemStatus {
         let status = await Task.detached(priority: .userInitiated) {
             CrossOverLicense.check(crossOverRoot: install.crossOverRoot)
         }.value
-        snapshot?.crossOverLicense = status
+        snapshot?.crossOverLicense[install.id] = status
         return status
     }
 
@@ -159,6 +200,9 @@ final class SystemStatus {
     }
 
     func requestInstall() async {
+        guard isIdle else { return }
+        checkingLicense = true
+        defer { checkingLicense = false }
         if let question = Self.activationQuestion(
             .install,
             licensed: await checkLicense()?.licensed,
@@ -173,6 +217,9 @@ final class SystemStatus {
     func requestCompatibilityTool(
         from chosen: CrossOverInstall? = nil, replacingExisting: Bool = false
     ) async {
+        guard isIdle else { return }
+        checkingLicense = true
+        defer { checkingLicense = false }
         let install = chosen ?? setupSource
         if let question = Self.activationQuestion(
             .compatibilityTool,
@@ -185,7 +232,31 @@ final class SystemStatus {
         }
     }
 
+    private(set) var pendingRemoval: String?
+
+    func requestBuildRemoval(_ build: String) {
+        guard isIdle else { return }
+        pendingRemoval = build
+        pendingConfirmation = .removeBuild
+    }
+
+    func cancelBuildRemoval() {
+        pendingRemoval = nil
+    }
+
+    func removePendingBuild() async {
+        guard let build = pendingRemoval else { return }
+        pendingRemoval = nil
+        await perform(from: RunnerInstaller.removeStep) { _ in
+            try await Task.detached(priority: .userInitiated) {
+                try RunnerInstaller.removeClone(forBuild: build)
+            }.value
+            return "Removed build \(SupportedRunners.displayVersion(forID: build))."
+        }
+    }
+
     func switchRunner(to build: RunnerBuild) async {
+        guard isIdle else { return }
         guard build.id != snapshot?.runner.buildIdentifier else { return }
         await perform(from: RunnerSetup.Phase.staging.label) { progress in
             let result = try await Task.detached(priority: .userInitiated) {
@@ -240,6 +311,13 @@ final class SystemStatus {
         from first: String,
         _ body: (_ progress: @escaping @Sendable (String) -> Void) async throws -> String?
     ) async {
+        guard !runInFlight else {
+            AppLog.note("run refused: '\(first)' overlaps a run already in flight")
+            return
+        }
+        runInFlight = true
+        defer { runInFlight = false }
+
         clearFailure()
         outcome = nil
         let run = beginRun(first)
@@ -368,5 +446,23 @@ final class SystemStatus {
         }.value
         snapshot = captured
         AppLog.note(captured)
+        await measureRunnerSizes()
+    }
+
+    private(set) var runnerSizes: [String: Int64] = [:]
+
+    func measureRunnerSizes() async {
+        let known = Set(runnerSizes.keys)
+        let present = await Task.detached(priority: .utility) {
+            Set(RunnerStore.clonedBuilds())
+        }.value
+
+        for stale in known.subtracting(present) { runnerSizes[stale] = nil }
+
+        for build in present.subtracting(known) {
+            runnerSizes[build] = await Task.detached(priority: .utility) {
+                RunnerStore.cloneSize(forBuild: build)
+            }.value
+        }
     }
 }

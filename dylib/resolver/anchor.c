@@ -21,11 +21,12 @@ static const char *const data_segs[] = {"__DATA_CONST", "__DATA"};
 static uintptr_t adrp_target(uintptr_t pc, uint32_t w, int *reg) {
     if ((w & 0x9F000000u) != 0x90000000u) return 0;
     *reg = (int)(w & 0x1Fu);
-    uint32_t lo = (w >> 29) & 3u;
-    uint32_t hi = (w >> 5)  & 0x7FFFFu;
-    int64_t imm = (int64_t)((hi << 2) | lo);
-    imm = (imm << 43) >> 43;
-    return (pc & ~(uintptr_t)0xFFF) + (uintptr_t)(imm << 12);
+    uint32_t lo  = (w >> 29) & 3u;
+    uint32_t hi  = (w >> 5)  & 0x7FFFFu;
+    uint32_t raw = (hi << 2) | lo;
+    // Sign-extend 21 bits without signed left-shift overflow.
+    int64_t imm = (int64_t)(raw ^ 0x100000u) - 0x100000;
+    return (pc & ~(uintptr_t)0xFFF) + (uintptr_t)(imm * 0x1000);
 }
 
 // Decode ADD (immediate) with shift=0 whose Rn matches `expected_rn`.
@@ -49,8 +50,9 @@ static uintptr_t ldr_slot_addr(uint32_t w, int expected_rn, uintptr_t page) {
 
 static uintptr_t branch26_target(uintptr_t pc, uint32_t w, uint32_t opcode) {
     if ((w & 0xFC000000u) != opcode) return 0;
-    int64_t imm = (int64_t)(w & 0x03FFFFFFu);
-    imm = (imm << 38) >> 38;
+    uint32_t raw = w & 0x03FFFFFFu;
+    // Sign-extend 26 bits without signed left-shift overflow.
+    int64_t imm = (int64_t)(raw ^ 0x2000000u) - 0x2000000;
     return pc + (uintptr_t)(imm * 4);
 }
 
@@ -60,6 +62,11 @@ static uintptr_t bl_target(uintptr_t pc, uint32_t w) {
 
 static uintptr_t b_target(uintptr_t pc, uint32_t w) {
     return branch26_target(pc, w, 0x14000000u);
+}
+
+// BLR, BLRAA, BLRAB, BLRAAZ and BLRABZ
+static int is_indirect_call(uint32_t w) {
+    return (w & 0xFEFFF000u) == 0xD63F0000u;
 }
 
 // Instructions that can legitimately begin a function
@@ -237,6 +244,12 @@ static uintptr_t scan_for_insn(uintptr_t text, size_t text_sz,
     return 0;
 }
 
+static int is_fn_start(const struct mach_header_64 *mh, intptr_t slide, uintptr_t fn) {
+    uintptr_t start, end;
+    if (np_function_bounds(mh, slide, fn, &start, &end) != 0) return 0;
+    return start == fn;
+}
+
 // The sole matching instruction pair inside one function body
 static uintptr_t body_end(const struct mach_header_64 *mh, intptr_t slide,
                           uintptr_t fn, uintptr_t text, size_t text_sz) {
@@ -308,6 +321,179 @@ static uintptr_t sole_insn_pair(const struct mach_header_64 *mh, intptr_t slide,
     return found;
 }
 
+// The ObjC runtime may replace __objc_selrefs pointers with interned selectors.
+static const char *objc_stub_selector(uintptr_t stub, uintptr_t selrefs,
+                                      size_t selrefs_sz) {
+    if (selrefs_sz < sizeof(uintptr_t)) return NULL;
+
+    int reg = -1;
+    uintptr_t page = adrp_target(stub, *(const uint32_t *)stub, &reg);
+    if (!page) return NULL;
+
+    uintptr_t slot = ldr_slot_addr(*(const uint32_t *)(stub + 4), reg, page);
+    if (!slot || slot < selrefs) return NULL;
+    if (slot - selrefs > selrefs_sz - sizeof(uintptr_t)) return NULL;
+    if ((slot - selrefs) % sizeof(uintptr_t)) return NULL;
+
+    return *(const char *const *)slot;
+}
+
+static int find_selrefs(const struct mach_header_64 *mh, intptr_t slide,
+                        uintptr_t *out_base, size_t *out_size) {
+    for (int s = 0; s < N_DATA_SEGS; s++) {
+        if (np_find_section(mh, slide, data_segs[s], "__objc_selrefs",
+                            out_base, out_size) == 0)
+            return 0;
+    }
+    return -1;
+}
+
+// __objc_stubs does not record entry stride.
+static uintptr_t objc_stub_for_selector(const struct mach_header_64 *mh,
+                                        intptr_t slide, const char *selector) {
+    uintptr_t stubs, selrefs;
+    size_t stubs_sz, selrefs_sz;
+
+    if (np_find_section(mh, slide, "__TEXT", "__objc_stubs", &stubs, &stubs_sz) != 0)
+        return 0;
+    if (find_selrefs(mh, slide, &selrefs, &selrefs_sz) != 0) return 0;
+    if (stubs_sz < 8) return 0;
+
+    uintptr_t found = 0;
+    for (uintptr_t pc = stubs; pc + 8 <= stubs + stubs_sz; pc += 4) {
+        const char *sel = objc_stub_selector(pc, selrefs, selrefs_sz);
+        if (!sel || strcmp(sel, selector) != 0) continue;
+        if (found) return 0;
+        found = pc;
+    }
+    return found;
+}
+
+static uintptr_t stub_for_name(const struct mach_header_64 *mh, intptr_t slide,
+                               const char *name) {
+    if (name[0] == NP_SELECTOR_MARK)
+        return objc_stub_for_selector(mh, slide, name + 1);
+    return np_import_stub_for_symbol(mh, slide, name);
+}
+
+typedef struct {
+    uintptr_t objc_base;
+    size_t    objc_size;
+    uintptr_t selrefs;
+    size_t    selrefs_size;
+    int       have_objc;
+} stub_tables_t;
+
+static void load_stub_tables(const struct mach_header_64 *mh, intptr_t slide,
+                             stub_tables_t *out) {
+    memset(out, 0, sizeof(*out));
+    if (np_find_section(mh, slide, "__TEXT", "__objc_stubs",
+                        &out->objc_base, &out->objc_size) != 0)
+        return;
+    if (find_selrefs(mh, slide, &out->selrefs, &out->selrefs_size) != 0)
+        return;
+    out->have_objc = 1;
+}
+
+static int callee_is_named(const struct mach_header_64 *mh, intptr_t slide,
+                           const stub_tables_t *tables, uintptr_t callee,
+                           const char *name) {
+    if (name[0] == NP_SELECTOR_MARK) {
+        if (!tables->have_objc) return 0;
+        if (callee < tables->objc_base) return 0;
+        if (callee + 8 > tables->objc_base + tables->objc_size) return 0;
+
+        const char *sel = objc_stub_selector(callee, tables->selrefs,
+                                             tables->selrefs_size);
+        return sel && strcmp(sel, name + 1) == 0;
+    }
+
+    const char *sym = np_import_stub_symbol(mh, slide, callee);
+    return sym && strcmp(sym, name) == 0;
+}
+
+static int body_matches_calls(const struct mach_header_64 *mh, intptr_t slide,
+                              uintptr_t fn, uintptr_t end,
+                              uintptr_t text, size_t text_sz,
+                              const stub_tables_t *tables,
+                              const np_anchor_t *anchor) {
+    int wanted = 0;
+
+    for (uintptr_t pc = fn; pc + 4 <= end; pc += 4) {
+        uint32_t w = *(const uint32_t *)pc;
+
+        if (anchor->no_data_refs) {
+            int reg = -1;
+            if (adrp_target(pc, w, &reg)) return 0;
+        }
+        if (anchor->calls_exact && is_indirect_call(w)) return 0;
+
+        uintptr_t callee = bl_target(pc, w);
+        if (!callee) continue;
+        if (callee < text || callee > text + text_sz - sizeof(uint32_t)) return 0;
+
+        if (wanted < anchor->call_count &&
+            callee_is_named(mh, slide, tables, callee, anchor->calls[wanted])) {
+            wanted++;
+            continue;
+        }
+        if (anchor->calls_exact) return 0;
+    }
+    return wanted == anchor->call_count;
+}
+
+static uintptr_t sole_fn_by_calls(const struct mach_header_64 *mh, intptr_t slide,
+                                  uintptr_t text, size_t text_sz,
+                                  const np_anchor_t *anchor) {
+    if (anchor->call_count < 1) return 0;
+
+    uintptr_t seed = stub_for_name(mh, slide, anchor->calls[0]);
+    if (!seed) {
+        NP_WARN("anchor: no stub calls '%s'", anchor->calls[0]);
+        return 0;
+    }
+
+    uintptr_t code;
+    size_t code_sz;
+    if (np_find_section(mh, slide, "__TEXT", "__text", &code, &code_sz) != 0 ||
+        code < text || code - text > text_sz || code_sz > text_sz - (code - text)) {
+        NP_WARN("anchor: no usable __text for '%s'", anchor->calls[0]);
+        return 0;
+    }
+
+    stub_tables_t tables;
+    load_stub_tables(mh, slide, &tables);
+
+    uintptr_t code_end = code + (code_sz & ~(size_t)3);
+    uintptr_t found = 0, prev_end = 0;
+
+    for (uintptr_t pc = code; pc + 4 <= code_end; pc += 4) {
+        if (pc < prev_end) continue;
+        if (bl_target(pc, *(const uint32_t *)pc) != seed) continue;
+
+        // A caller without bounds could hide a second match.
+        uintptr_t fn, end;
+        if (np_function_bounds(mh, slide, pc, &fn, &end) != 0 ||
+            fn < code || end > code_end || ((fn | end) & 3)) {
+            NP_WARN("anchor: '%s' caller at 0x%lx has no usable function bounds",
+                    anchor->calls[0], (unsigned long)(pc - (uintptr_t)slide));
+            return 0;
+        }
+        prev_end = end;
+
+        if (!body_matches_calls(mh, slide, fn, end, text, text_sz, &tables, anchor))
+            continue;
+        if (found) {
+            NP_WARN("anchor: '%s' call shape matches 0x%lx and 0x%lx",
+                    anchor->calls[0], (unsigned long)(found - (uintptr_t)slide),
+                    (unsigned long)(fn - (uintptr_t)slide));
+            return 0;
+        }
+        found = fn;
+    }
+    return found;
+}
+
 // Public entry point
 uintptr_t np_locate_anchor(const struct mach_header_64 *mh, intptr_t slide,
                             uintptr_t text_base, size_t text_size,
@@ -329,6 +515,9 @@ uintptr_t np_locate_anchor(const struct mach_header_64 *mh, intptr_t slide,
         if (fn < text_base || fn > text_base + text_size - sizeof(uint32_t)) return 0;
         return np_looks_like_prologue(fn) ? fn : 0;
     }
+
+    if (anchor->kind == NP_MATCH_CALLS)
+        return sole_fn_by_calls(mh, slide, text_base, text_size, anchor);
 
     // Both STRING and INSN_AFTER_STRING start with a string xref.
     uintptr_t str = cstring_va(mh, slide, anchor->str);
@@ -377,7 +566,7 @@ uintptr_t np_locate_anchor(const struct mach_header_64 *mh, intptr_t slide,
     } else {
         fn = enclosing_fn(mh, slide, text_base, ref);
     }
-    if (!fn) return 0;
+    if (!fn || !is_fn_start(mh, slide, fn)) return 0;
 
     if (anchor->kind == NP_MATCH_INSN_PAIR_IN_FN)
         return sole_insn_pair(mh, slide, fn, text_base, text_size, &anchor->pair);

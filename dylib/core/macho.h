@@ -21,4 +21,15 @@ int np_get_section_containing(const struct mach_header_64 *mh, intptr_t slide,
 int np_function_bounds(const struct mach_header_64 *mh, intptr_t slide,
                        uintptr_t addr, uintptr_t *out_start, uintptr_t *out_end);
 
+int np_find_section(const struct mach_header_64 *mh, intptr_t slide,
+                    const char *segname, const char *sectname,
+                    uintptr_t *out_base, size_t *out_size);
+
+// The indirect symbol table maps __stubs entries to imports.
+const char *np_import_stub_symbol(const struct mach_header_64 *mh, intptr_t slide,
+                                  uintptr_t stub);
+
+uintptr_t np_import_stub_for_symbol(const struct mach_header_64 *mh, intptr_t slide,
+                                    const char *symbol);
+
 #endif // NOTPROTON_CORE_MACHO_H

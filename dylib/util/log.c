@@ -3,6 +3,7 @@
 #include "file.h"
 #include <stdlib.h>
 #include <stdint.h>
+#include <pthread.h>
 #include <sys/stat.h>
 
 int np_log_level = NP_LVL_INFO;
@@ -54,7 +55,7 @@ int np_log_first_hit(const void *anchor, unsigned long tag) {
     return 0;
 }
 
-void np_log_init(void) {
+static void log_open(int may_rotate) {
     const char *want = getenv("NOTPROTON_LOG_LEVEL");
     if (want && want[0]) {
         int parsed = atoi(want);
@@ -76,8 +77,23 @@ void np_log_init(void) {
     snprintf(logpath, sizeof(logpath), "%s/notproton.log", folder);
 
     struct stat info;
-    int oversize = (stat(logpath, &info) == 0 && info.st_size > NP_LOG_MAX_BYTES);
+    int oversize = (may_rotate && stat(logpath, &info) == 0
+                    && info.st_size > NP_LOG_MAX_BYTES);
     np_log_file = fopen(logpath, oversize ? "w" : "a");
     if (np_log_file)
         setlinebuf(np_log_file);
+}
+
+void np_log_init(void) {
+    log_open(1);
+}
+
+static pthread_once_t np_attach_once = PTHREAD_ONCE_INIT;
+
+static void log_attach_once(void) {
+    log_open(0);
+}
+
+void np_log_attach(void) {
+    pthread_once(&np_attach_once, log_attach_once);
 }

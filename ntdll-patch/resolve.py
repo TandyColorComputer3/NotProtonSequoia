@@ -47,9 +47,43 @@ PINNED = {
          'payload': 'bee4ee13c235bd5de3cb6ce840b9695effd5623132f6dc0d137496d6a5330f5e',
          'exports': {'LdrGetDllHandle': 0x180043328, 'LdrLoadDll': 0x180040e94,
                      'NtProtectVirtualMemory': 0x180065db0}},
+    '5b388fd48823e905616432fba627eb48f68dc14383963bb213d55db3f691b1b9':
+        {'hookRVA': 0x52055, 'stolen': '4883bc24f000000000', 'caveRVA': 0x815e0, 'caveSize': 2592,
+         'resume': 0x5205e, 'wm': 'rsi', 'load_path': 0xd0,
+         'payload': '67b70667387ff5bf89743b2d0a995a94543812678d4558dc884e6cebb46e7750',
+         'exports': {'LdrGetDllHandle': 0x170017710, 'LdrLoadDll': 0x170018230,
+                     'NtProtectVirtualMemory': 0x17000f690, 'NtOpenFile': 0x17000f2f0,
+                     'NtReadFile': 0x17000ed50, 'NtClose': 0x17000ee70}},
+    'e7da2a712870222942ef27a80b3bf4fa70fc8545dd1a64bdc7f2fa24a38debc3':
+        {'hookRVA': 0x4d848, 'stolen': 'f645bc027526', 'caveRVA': 0x7d1f0, 'caveSize': 3600,
+         'resume': 0x4d84e, 'wm': 'edi', 'load_path': -0x54,
+         'payload': '3eaa5021add0c8e30e324d6b1a6392a32720f5f73596418a2086b7f8081eb1bd',
+         'exports': {'LdrGetDllHandle': 0x7bc125f0, 'LdrLoadDll': 0x7bc130e0,
+                     'NtProtectVirtualMemory': 0x7bc0d7a4, 'NtOpenFile': 0x7bc0d5d4,
+                     'NtReadFile': 0x7bc0d304, 'NtClose': 0x7bc0d394}},
+    '66b1a244a611795c59a93a9491d17f36c98cd8db9be495004a37864e0e5ed4a5':
+        {'hookRVA': 0x2ede2, 'stolen': '8b4514a802', 'caveRVA': 0xa4000, 'caveSize': 4096,
+         'resume': 0x2ede7, 'wm': 'esi', 'load_path': -0x3c,
+         'payload': '6ff6c7289e639c4caad85c2670bfa849d9f36baa24152b6979896caede5e249b',
+         'exports': {'LdrGetDllHandle': 0x7bc2a670, 'LdrLoadDll': 0x7bc28660,
+                     'NtProtectVirtualMemory': 0x7bc4d800, 'NtOpenFile': 0x7bc4d630,
+                     'NtReadFile': 0x7bc4d360, 'NtClose': 0x7bc4d3f0}},
+    '77ca83b2e1a3a1242f9d2d8868328262b2bcfc3f59bacf8b9389ea7e797ea852':
+        {'caveRVA': 0xf3185, 'caveSize': 52859,
+         'sites': [{'hookRVA': 0x48738, 'stolen': '1f2003d5', 'resume': 0x4873c,
+                    'wm': 'x27', 'load_path': -0x98},
+                   {'hookRVA': 0xa883c, 'stolen': '1f2003d5', 'resume': 0xa8840,
+                    'wm': 'x22', 'load_path': -0x88}],
+         'guest': {'LdrLoadDll': 0xa0aa0, 'LdrGetDllHandle': 0xa0aa0,
+                   'NtProtectVirtualMemory': 0xecf9c},
+         'payload': 'c6060b07f2c2f25636fcb1489ddd6729c277666167e9a090f55a1b711f0d5979',
+         'exports': {'LdrGetDllHandle': 0x18004390c, 'LdrLoadDll': 0x180041344,
+                     'NtProtectVirtualMemory': 0x180067050, 'NtOpenFile': 0x180066cb0,
+                     'NtReadFile': 0x180066710, 'NtClose': 0x180066830}},
 }
 EXPORTS = ['LdrGetDllHandle', 'LdrLoadDll', 'NtProtectVirtualMemory',
            'NtOpenFile', 'NtReadFile', 'NtClose']
+SECTION_NAME, SECTION_SIZE, SECTION_FLAGS = b'.npdet', 0x1000, 0x60000020
 PROLOGUES = [rb'\x55\x89\xe5', rb'\x55\x8b\xec']
 NOP64 = bytes.fromhex('1f2003d5')
 
@@ -81,6 +115,9 @@ class PE:
             if roff:
                 self.secs.append((name, vrva, vsize, roff, rsize))
         self.dirs = self.opt + (112 if wide else 96)
+        self.table_end = e + 24 + optsz + nsec * 40
+        self.sect_align, self.file_align = struct.unpack_from('<II', self.d, self.opt + 32)
+        self.size_of_image, self.size_of_headers = struct.unpack_from('<II', self.d, self.opt + 56)
 
     def sec(self, prefix):
         for s in self.secs:
@@ -136,7 +173,15 @@ class PE:
         # at the end that the loader maps but nothing touches. Detour goes there.
         _, vrva, vsize, roff, rsize = self.sec('.text')
         end = vrva + vsize
-        return {'caveRVA': end, 'caveSize': (vrva + rsize) - end, 'fill': self.d[roff + vsize]}
+        return {'caveRVA': end, 'caveSize': (vrva + rsize) - end, 'fill': self.d[roff + vsize],
+                'placement': 'padding'}
+
+    def appended(self):
+        if self.table_end + 40 > self.size_of_headers or any(self.d[self.table_end:self.table_end + 40]):
+            raise SystemExit(f"{self.path}: no free section header slot after the table")
+        raw = (len(self.d) + self.file_align - 1) & ~(self.file_align - 1)
+        return {'caveRVA': self.size_of_image, 'caveSize': SECTION_SIZE, 'fill': 0,
+                'placement': 'section', 'rawOffset': raw}
 
     def string_refs(self, name):
         """RVAs of instructions referencing a .rdata C string, however the arch addresses it."""
@@ -543,6 +588,8 @@ def resolve(path):
     r = (resolve_aarch64(pe) if pe.machine == 0xaa64 else
          resolve_amd64(pe) if pe.machine == 0x8664 else resolve_i386(pe))
     r.update(pe.cave())
+    if r['caveSize'] < PAYLOAD[pe.machine]:
+        r.update(pe.appended())
     r['machine'], r['magic'], r['imageBase'] = pe.machine, pe.magic, pe.imagebase
     ex = pe.exports()
     r['exports'] = {n: pe.imagebase + ex[n] for n in EXPORTS if n in ex}
@@ -593,6 +640,7 @@ def report(path):
     line('caveRVA', r['caveRVA'], 'caveRVA')
     line('caveSize', r['caveSize'], 'caveSize', fmt=str)
     need = PAYLOAD[r['machine']]
+    print(f"  {'placement':13} {r['placement']}")
     print(f"  {'cave fill':13} {r['fill']:#02x}   room {r['caveSize']} bytes, payload {need}"
           f" -> {'fits' if r['caveSize'] >= need else 'TOO SMALL'}")
     def table(items, want):
@@ -658,6 +706,7 @@ def shell_vars(path):
         'NP_CAVE_RVA': f"{r['caveRVA']:#x}", 'NP_CAVE_SIZE': str(r['caveSize']),
         'NP_PAYLOAD_RVA': f"{payload:#x}", 'NP_PAYLOAD_VA': f"{r['imageBase'] + payload:#x}",
         'NP_CAVE_ROOM': str(room), 'NP_FILL': f"{r['fill']:#04x}",
+        'NP_PLACEMENT': r['placement'],
     }
     if PINNED.get(r['sha256'], {}).get('payload'):
         out['NP_PAYLOAD_SHA256'] = PINNED[r['sha256']]['payload']

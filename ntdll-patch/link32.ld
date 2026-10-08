@@ -1,4 +1,4 @@
-// i386 ntdll.dll cave layout, link time only
+/* i386 ntdll.dll cave layout, link time only */
 SECTIONS {
   . = CAVE_VA;
   .cave : SUBALIGN(1) {
