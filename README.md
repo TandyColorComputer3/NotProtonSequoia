@@ -1,5 +1,10 @@
 # NotProton Sequoia
 
+> **Save-data warning:** Prefix creation/rebuilding and Steam Cloud save synchronization
+> have not been fully tested on Sequoia. Incorrect save paths or newly created saves
+> could overwrite existing progress locally or in Steam Cloud. Back up your saves
+> independently before testing; Steam Cloud is not a backup.
+
 This community fork integrates upstream NotProton 1.0.3 and targets Apple Silicon
 Macs running macOS Sequoia 15. It is not an official upstream release.
 The source baseline includes upstream main through `c3a4948`.
