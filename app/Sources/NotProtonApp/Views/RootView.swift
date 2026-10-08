@@ -84,8 +84,32 @@ private struct SetupGuide: View {
     }
 
     private var crossOverReady: Bool {
+        if toolReady { return true }
         guard let runner = status.snapshot?.runner else { return false }
         return runner.builds.isEmpty ? status.usableCrossOver != nil : status.repairSource != nil
+    }
+
+    private var requiredCrossOver: RunnerBuild? {
+        guard !toolReady, let runner = status.snapshot?.runner else { return nil }
+        return runner.builds.compactMap(SupportedRunners.build(id:)).first
+    }
+
+    private var crossOverInstruction: String {
+        if toolReady {
+            return "Your existing compatibility tool is ready. You do not need to choose CrossOver again."
+        }
+        if crossOverReady {
+            return "The CrossOver build that matches your compatibility tool is selected."
+        }
+        if let requiredCrossOver {
+            return "Choose CrossOver Preview " + requiredCrossOver.releaseVersion
+                + ". A green dot on a different CrossOver only means that app is supported."
+        }
+        return "Choose the CrossOver app you want NotProton to use."
+    }
+
+    private var chooseCrossOverLabel: String {
+        requiredCrossOver.map { "Choose " + $0.releaseVersion + "…" } ?? "Choose…"
     }
 
     private var toolReady: Bool {
@@ -124,13 +148,11 @@ private struct SetupGuide: View {
 
                 GuideStep(
                     number: 2,
-                    title: "Choose CrossOver",
-                    instruction: crossOverReady
-                        ? "A supported CrossOver is selected."
-                        : "Choose your CrossOver Preview app.",
+                    title: toolReady ? "Keep Your Existing Tool" : "Choose Matching CrossOver",
+                    instruction: crossOverInstruction,
                     isDone: crossOverReady,
                     isCurrent: steamReady && !crossOverReady,
-                    button: crossOverReady ? nil : "Choose…",
+                    button: crossOverReady ? nil : chooseCrossOverLabel,
                     isEnabled: steamReady && status.isIdle
                 ) { Task { await status.addCrossOver() } }
 
