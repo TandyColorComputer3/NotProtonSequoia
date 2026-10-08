@@ -30,13 +30,19 @@ struct RootView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $pane) {
-                ForEach(Pane.allCases) { item in
-                    Label(item.label, systemImage: item.symbol)
-                        .tag(item)
+            VStack(spacing: 0) {
+                List(selection: $pane) {
+                    ForEach(Pane.allCases) { item in
+                        Label(item.label, systemImage: item.symbol)
+                            .tag(item)
+                    }
                 }
+                .listStyle(.sidebar)
+                .frame(height: 124)
+
+                Divider()
+                SetupGuide()
             }
-            .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
         } detail: {
             switch pane {
@@ -45,5 +51,141 @@ struct RootView: View {
             case .backups: BackupsView()
             }
         }
+    }
+}
+
+private struct SetupGuide: View {
+    @Environment(SystemStatus.self) private var status
+
+    private var steamReady: Bool {
+        guard let snapshot = status.snapshot else { return false }
+        guard case .installed(let version) = snapshot.steam,
+              version == AppVersion.bundled
+        else { return false }
+        return snapshot.installContent == .current || snapshot.installContent == .unchecked
+    }
+
+    private var crossOverReady: Bool {
+        guard let runner = status.snapshot?.runner else { return false }
+        return runner.builds.isEmpty ? status.usableCrossOver != nil : status.repairSource != nil
+    }
+
+    private var toolReady: Bool {
+        guard let snapshot = status.snapshot,
+              case .ready = snapshot.runner
+        else { return false }
+        return snapshot.payload.missing(origin: .patched).isEmpty
+    }
+
+    private var toolLabel: String {
+        status.snapshot?.runner == RunnerState.none ? "Set Up" : "Repair"
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("After an Update")
+                        .font(.headline)
+                    Text("Do these in order. Stop when you see a red message and read it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                GuideStep(
+                    number: 1,
+                    title: "Install NotProton",
+                    instruction: steamReady
+                        ? "The current version is installed."
+                        : installInstruction,
+                    isDone: steamReady,
+                    isCurrent: !steamReady,
+                    button: steamReady ? nil : "Install Update",
+                    isEnabled: status.canInstall
+                ) { Task { await status.requestInstall() } }
+
+                GuideStep(
+                    number: 2,
+                    title: "Choose CrossOver",
+                    instruction: crossOverReady
+                        ? "A supported CrossOver is selected."
+                        : "Choose your CrossOver Preview app.",
+                    isDone: crossOverReady,
+                    isCurrent: steamReady && !crossOverReady,
+                    button: crossOverReady ? nil : "Choose…",
+                    isEnabled: steamReady && status.isIdle
+                ) { Task { await status.addCrossOver() } }
+
+                GuideStep(
+                    number: 3,
+                    title: "Set Up the Tool",
+                    instruction: toolReady
+                        ? "The game compatibility tool is ready."
+                        : "Click below and wait until the app says Done.",
+                    isDone: toolReady,
+                    isCurrent: steamReady && crossOverReady && !toolReady,
+                    button: toolReady ? nil : toolLabel,
+                    isEnabled: steamReady && crossOverReady && status.canInstall
+                ) { Task { await status.requestCompatibilityTool() } }
+
+                GuideStep(
+                    number: 4,
+                    title: "Play",
+                    instruction: toolReady
+                        ? "Open Steam and launch your game."
+                        : "Finish the steps above first.",
+                    isDone: toolReady && (status.snapshot?.steamRunning ?? false),
+                    isCurrent: steamReady && crossOverReady && toolReady,
+                    button: toolReady ? "Open Steam" : nil,
+                    isEnabled: toolReady
+                ) { NSWorkspace.shared.open(SupportPaths.Steam.app) }
+            }
+            .padding(12)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var installInstruction: String {
+        if status.failureRemedy?.settingsPane != nil {
+            return "macOS blocked it. In the red message, click Open Settings. Turn on NotProton, come back, then click Install Update again."
+        }
+        return "Click below. If macOS blocks it, allow NotProton in System Settings, then click again."
+    }
+}
+
+private struct GuideStep: View {
+    let number: Int
+    let title: String
+    let instruction: String
+    let isDone: Bool
+    let isCurrent: Bool
+    let button: String?
+    let isEnabled: Bool
+    let perform: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: isDone ? "checkmark.circle.fill" : "\(number).circle.fill")
+                .foregroundStyle(isDone ? Color.green : isCurrent ? Color.accentColor : Color.secondary)
+                .font(.title3)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(instruction)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let button {
+                    Button(button, action: perform)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(!isEnabled)
+                }
+            }
+        }
+        .opacity(isDone || isCurrent ? 1 : 0.65)
+        .accessibilityElement(children: .combine)
     }
 }

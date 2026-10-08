@@ -349,7 +349,7 @@ struct StatusView: View {
                 }
             }
 
-            componentsSection(snapshot.payload)
+            componentsSection(snapshot.payload, runner: snapshot.runner)
 
             dangerSection
         }
@@ -694,7 +694,7 @@ struct StatusView: View {
     }
 
     @ViewBuilder
-    private func componentsSection(_ payload: PayloadState) -> some View {
+    private func componentsSection(_ payload: PayloadState, runner: RunnerState) -> some View {
         if let problem = payload.manifestProblem {
             Section("NotProton Components") {
                 StatusRow(title: "Components", value: "Component list unreadable.", tone: .bad, detail: problem)
@@ -713,15 +713,31 @@ struct StatusView: View {
             }
         } else {
             Section("NotProton Components") {
-                if !payload.missing.isEmpty {
-                    let names = payload.missing.map {
+                let runnerFiles = payload.missing(origin: .patched)
+                let otherFiles = payload.missing.filter { $0.origin != .patched }
+                if !runnerFiles.isEmpty {
+                    let label = runner == .none ? "Set Up" : "Repair"
+                    StatusRow(
+                        title: "Compatibility Tool",
+                        value: "Set up required.",
+                        tone: .warning,
+                        action: StatusAction(
+                            label: label,
+                            isProminent: true,
+                            help: "Set up the compatibility tool from CrossOver.",
+                            isEnabled: status.canInstall && status.setupSource != nil
+                        ) { Task { await status.requestCompatibilityTool() } }
+                    )
+                }
+                if !otherFiles.isEmpty {
+                    let names = otherFiles.map {
                         URL(filePath: $0.path).lastPathComponent
                     }.joined(separator: ", ")
                     StatusRow(
-                        title: "Missing.",
+                        title: "Missing Components",
                         value: names,
                         tone: .bad,
-                        action: payload.missing.contains(where: { $0.origin.isFetchable })
+                        action: otherFiles.contains(where: { $0.origin.isFetchable })
                             ? fetchAction() : nil
                     )
                 }
