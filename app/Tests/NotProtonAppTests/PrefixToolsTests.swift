@@ -6,6 +6,23 @@ import Testing
 @Suite("Prefix tools")
 struct PrefixToolsTests {
 
+    @Test("A dual-host runner keeps the Rosetta loader and matching server")
+    func dualHostLayout() throws {
+        let fm = FileManager.default
+        let runner = URL(filePath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
+        defer { try? fm.removeItem(at: runner) }
+        for path in ["lib/wine/x86_64-unix/wine", "bin/wineserver-x86",
+                     "lib/wine/aarch64-unix/wine.app/Contents/MacOS/wine", "bin/wineserver-arm64"] {
+            let file = runner.appending(path: path)
+            try fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data().write(to: file)
+            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path(percentEncoded: false))
+        }
+        let layout = PrefixTools.layout(runner: runner)
+        #expect(layout.loader == runner.appending(path: "lib/wine/x86_64-unix/wine"))
+        #expect(layout.server == runner.appending(path: "bin/wineserver-x86"))
+    }
+
     // The launch path is shell and this is Swift, so the rules it carries are read back
     // out of compat_run.sh rather than restated here.
     private static func compatSource() throws -> String {
@@ -189,11 +206,14 @@ struct PrefixToolsTests {
         }
     }
 
-    @Test("Every kind offered by the file picker is a kind that can be run")
+    @Test("The picker resolves each supported Windows program extension")
     func pickerTypesMatchWhatRuns() {
-        let extensions = PrefixTools.runnableTypes.compactMap(\.preferredFilenameExtension)
-        #expect(!extensions.isEmpty)
-        for extension_ in extensions {
+        let types = PrefixTools.runnableTypes
+        #expect(types.count == 4)
+        // A system UTI can have several extensions; its preferred extension
+        // depends on installed apps and need not be the one we requested.
+        for extension_ in ["exe", "msi", "bat", "cmd"] {
+            #expect(types.contains { $0.tags[.filenameExtension]?.contains(extension_) == true })
             #expect(
                 PrefixTools.arguments(for: URL(filePath: "/games/thing.\(extension_)")) != nil,
                 "the picker offers \(extension_) but nothing runs it")

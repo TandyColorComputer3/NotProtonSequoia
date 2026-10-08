@@ -36,14 +36,14 @@ export CX_ROOT
 # cxcompatdb resolves its database through CX_HOME and logs an error for
 # every module loaded without it :(
 export CX_HOME="$HOME/Library/Application Support/CrossOver"
-wine_unix="$CX_ROOT/lib/wine/aarch64-unix"
-WINELOADER="$wine_unix/wine.app/Contents/MacOS/wine"
-WINESERVER="$CX_ROOT/bin/wineserver-arm64"
+wine_unix="$CX_ROOT/lib/wine/x86_64-unix"
+WINELOADER="$wine_unix/wine"
+WINESERVER="$CX_ROOT/bin/wineserver"
+[ -x "$WINESERVER" ] || WINESERVER="$CX_ROOT/bin/wineserver-x86"
 if [ ! -x "$WINELOADER" ] || [ ! -x "$WINESERVER" ]; then
-  wine_unix="$CX_ROOT/lib/wine/x86_64-unix"
-  WINELOADER="$wine_unix/wine"
-  WINESERVER="$CX_ROOT/bin/wineserver"
-  [ -x "$WINESERVER" ] || WINESERVER="$CX_ROOT/bin/wineserver-x86"
+  wine_unix="$CX_ROOT/lib/wine/aarch64-unix"
+  WINELOADER="$wine_unix/wine.app/Contents/MacOS/wine"
+  WINESERVER="$CX_ROOT/bin/wineserver-arm64"
 fi
 export WINELOADER WINESERVER
 export WINEDLLPATH="$CX_ROOT/lib/wine/x86_64-windows:$wine_unix"

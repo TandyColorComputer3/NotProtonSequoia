@@ -217,7 +217,9 @@ struct FailureRemedyTests {
         let pane = try #require(Remedy.appManagement.settingsPane)
 
         #expect(pane.scheme == "x-apple.systempreferences")
-        #expect(pane.query == "Privacy_AppBundles")
+        // Foundation on Sequoia treats this custom-scheme URL as opaque.
+        #expect(pane.absoluteString ==
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AppBundles")
     }
 }
 

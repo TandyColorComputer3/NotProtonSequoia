@@ -335,7 +335,7 @@ struct StatusView: View {
         StatusAction(
             label: "Install",
             isProminent: prominent,
-            help: "Install NotProton into Steam.",
+            help: "Install the bundled NotProton component into Steam.",
             isEnabled: status.isIdle
         ) {
             Task { await status.requestInstall() }
@@ -370,10 +370,9 @@ struct StatusView: View {
                     action: installAction(prominent: true)
                 )
             }
-        case .outdated(_, let bundled):
+        case .outdated:
             StatusRow(
                 title: "NotProton",
-                value: "Update available (\(bundled)).",
                 tone: .warning,
                 action: installAction(prominent: true)
             )

@@ -61,6 +61,15 @@ enum PrefixTools {
             fm.isExecutableFile(atPath: url.path(percentEncoded: false))
         }
 
+        // Dual-host Preview bundles also ship an ARM loader. Keep the tested
+        // Rosetta host for win64 prefixes when its loader and server are present.
+        let unix = runner.appending(path: "lib/wine/x86_64-unix")
+        let server = bin.appending(path: "wineserver")
+        let x86Server = executable(server) ? server : bin.appending(path: "wineserver-x86")
+        if executable(unix.appending(path: "wine")), executable(x86Server) {
+            return WineLayout(loader: unix.appending(path: "wine"), server: x86Server, unixDir: unix)
+        }
+
         let arm = runner.appending(path: "lib/wine/aarch64-unix")
         let armLoader = arm.appending(path: "wine.app/Contents/MacOS/wine")
         let armServer = bin.appending(path: "wineserver-arm64")
@@ -68,8 +77,6 @@ enum PrefixTools {
             return WineLayout(loader: armLoader, server: armServer, unixDir: arm)
         }
 
-        let unix = runner.appending(path: "lib/wine/x86_64-unix")
-        let server = bin.appending(path: "wineserver")
         return WineLayout(
             loader: unix.appending(path: "wine"),
             server: executable(server) ? server : bin.appending(path: "wineserver-x86"),

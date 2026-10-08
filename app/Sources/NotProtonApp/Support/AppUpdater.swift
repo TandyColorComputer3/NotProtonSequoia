@@ -1,26 +1,12 @@
-import Sparkle
+import AppKit
 
 @MainActor
 final class AppUpdater {
 
-    private let controller: SPUStandardUpdaterController
-
-    init() {
-        #if DEBUG
-        let scheduling = false
-        #else
-        let scheduling = true
-        #endif
-        controller = SPUStandardUpdaterController(
-            startingUpdater: scheduling,
-            updaterDelegate: nil,
-            userDriverDelegate: nil
-        )
-    }
-
     func check() {
-        #if !DEBUG
-        controller.checkForUpdates(nil)
-        #endif
+        // Fork releases are manual until we have our own signed update feed.
+        if let url = URL(string: "https://github.com/TandyColorComputer3/NotProtonSequoia/releases") {
+            NSWorkspace.shared.open(url)
+        }
     }
 }

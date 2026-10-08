@@ -1,4 +1,25 @@
-# NotProton
+# NotProton Sequoia
+
+This community fork integrates upstream NotProton 1.0.3 and targets Apple Silicon
+Macs running macOS Sequoia 15. It is not an official upstream release.
+The source baseline includes upstream main through `c3a4948`.
+
+Sequoia changes include Swift 6.1 build compatibility, classic ICNS icon generation,
+compatible toolbars, and Rosetta-first loader selection for dual-host runners.
+ARM-only runners retain the ARM loader fallback. The bridge is installed for every
+Unix loader shipped in a runner.
+
+Build with `make app`; the result is `out/NotProton.app`. Use `make app-zip` to package
+the bundle. Building requires Xcode, the bridge toolchain and staged bridge binaries
+(see the build targets and `bridge/setup-wine-tree.sh`).
+
+App updates are manual: **Sequoia Releases…** opens this fork's releases page.
+The Status pane separately shows the version of the component deployed into Steam.
+**Install** installs the component bundled in the app and may stop Steam.
+
+Before testing games, keep independent save backups. Automated prefix tests do not
+prove Steam Cloud synchronization is safe for every game. Real game/Cloud validation
+is still required before treating a build as fully tested.
 
 NotProton enables the Steam Play experience from Linux Steam in the macOS Steam client.
 

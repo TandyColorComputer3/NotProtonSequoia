@@ -510,7 +510,18 @@ $(ICON_CAR): $(ICONGEN)
 		--output-partial-info-plist "$(ICON_DIR)/partial.plist" >/dev/null
 	@echo "==> Built $@"
 
-app: app-payload
+$(OUT_DIR)/NotProton.icns: $(ICONGEN)
+	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	mkdir -p "$$tmp/NotProton.iconset"; \
+	$(ICONGEN) --legacy-png "$$tmp/icon.png"; \
+	for size in 16 32 128 256 512; do \
+		sips -z $$size $$size "$$tmp/icon.png" --out "$$tmp/NotProton.iconset/icon_$${size}x$${size}.png" >/dev/null; \
+		double=$$((size * 2)); \
+		sips -z $$double $$double "$$tmp/icon.png" --out "$$tmp/NotProton.iconset/icon_$${size}x$${size}@2x.png" >/dev/null; \
+	done; \
+	iconutil -c icns "$$tmp/NotProton.iconset" -o "$@"
+
+app: app-payload $(OUT_DIR)/NotProton.icns
 	swift build --package-path app -c release
 	rm -rf "$(APP_BUNDLE)"
 	@mkdir -p "$(APP_BUNDLE)/Contents/MacOS" "$(APP_BUNDLE)/Contents/Resources"

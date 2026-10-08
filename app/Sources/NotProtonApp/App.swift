@@ -31,7 +31,7 @@ struct NotProtonApp: App {
         CommandGroup(replacing: .newItem) {}
 
         CommandGroup(after: .appInfo) {
-            Button("Check for Updates…") { updater.check() }
+            Button("Sequoia Releases…") { updater.check() }
         }
 
         CommandGroup(after: .sidebar) {
