@@ -32,6 +32,7 @@ struct StatusAction {
     var role: ButtonRole?
     var help: String?
     var isEnabled = true
+    var startsGroup = false
     let perform: () -> Void
 }
 
@@ -43,15 +44,16 @@ enum StatusMetrics {
 
 struct StatusRow: View {
 
-    @Environment(\.colorSchemeContrast) private var contrast
-
     let title: String
     var value: String?
 
     var tone: StatusTone?
     var detail: String?
+    var trailing: String?
     var secondaryAction: StatusAction?
     var action: StatusAction?
+    var menu: [StatusAction] = []
+    var toggle: Binding<Bool>?
 
     var body: some View {
         HStack(alignment: .center, spacing: 0) {
@@ -76,14 +78,26 @@ struct StatusRow: View {
                     if let detail {
                         Text(detail)
                             .font(.callout)
-                            .foregroundStyle(contrast == .increased ? .secondary : .tertiary)
+                            .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                     }
                 }
             }
 
-            if secondaryAction != nil || action != nil {
+            if secondaryAction != nil || action != nil || !menu.isEmpty || toggle != nil || trailing != nil {
                 Spacer(minLength: 12)
+            }
+            if let trailing {
+                Text(trailing)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+                    .padding(.trailing, action == nil && menu.isEmpty ? 0 : 8)
+            }
+            if let toggle {
+                Toggle(title, isOn: toggle)
+                    .toggleStyle(.switch)
+                    .labelsHidden()
             }
             if let secondaryAction {
                 button(secondaryAction)
@@ -98,9 +112,38 @@ struct StatusRow: View {
                     .help(action.help ?? "")
                     .accessibilityLabel("\(action.label), \(title)")
             }
+            if !menu.isEmpty {
+                Menu {
+                    menuItems(menu, hidingUnavailable: false)
+                } label: {
+                    Label("More", systemImage: "ellipsis")
+                        .labelStyle(.iconOnly)
+                }
+                .menuStyle(.button)
+                .buttonStyle(.bordered)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("More actions")
+                .accessibilityLabel("More actions, \(title)")
+                .padding(.leading, action == nil ? 0 : 8)
+            }
         }
         .accessibilityElement(children: .combine)
         .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .contextMenu {
+            menuItems([action, secondaryAction].compactMap { $0 } + menu, hidingUnavailable: true)
+        }
+    }
+
+    @ViewBuilder
+    private func menuItems(_ items: [StatusAction], hidingUnavailable: Bool) -> some View {
+        let shown = hidingUnavailable ? items.filter(\.isEnabled) : items
+        ForEach(Array(shown.enumerated()), id: \.offset) { index, item in
+            if item.startsGroup && index > 0 { Divider() }
+            Button(item.label, role: item.role, action: item.perform)
+                .disabled(!item.isEnabled)
+        }
     }
 
     @ViewBuilder
@@ -165,21 +208,18 @@ struct StatusView: View {
             )
         }
         .confirmationDialog(
-            "Are you sure?",
+            status.pendingRemoval.map {
+                "Remove the \(SupportedRunners.displayVersion(forID: $0)) copy?"
+            } ?? "",
             isPresented: asking(.removeBuild),
             titleVisibility: .visible
         ) {
-            Button("Remove", role: .destructive) {
+            Button("Remove Copy", role: .destructive) {
                 Task { await status.removePendingBuild() }
             }
             Button("Cancel", role: .cancel) { status.cancelBuildRemoval() }
         } message: {
-            if let build = status.pendingRemoval {
-                Text(
-                    "Are you sure you want to remove "
-                        + "\(SupportedRunners.displayVersion(forID: build))?"
-                )
-            }
+            Text("CrossOver itself is not removed.")
         }
         .confirmationDialog(
             "Remove everything NotProton has created?",
@@ -237,6 +277,16 @@ struct StatusView: View {
     }
 
     private func statusForm(_ snapshot: StatusSnapshot) -> some View {
+        ScrollViewReader { proxy in
+            form(snapshot)
+                .onChange(of: status.highlightedRow) { _, row in
+                    guard let row else { return }
+                    withAnimation { proxy.scrollTo(row, anchor: .center) }
+                }
+        }
+    }
+
+    private func form(_ snapshot: StatusSnapshot) -> some View {
         Form {
             if let failure = status.failure {
                 StatusRow(
@@ -251,6 +301,10 @@ struct StatusView: View {
                 )
             } else if let outcome = status.outcome {
                 StatusRow(title: "Done", value: outcome, tone: .ok)
+            }
+
+            if let failure = status.templateCleanupFailure {
+                StatusRow(title: "Template cleanup incomplete", value: failure, tone: .warning)
             }
 
             if let activity = status.activity {
@@ -272,23 +326,26 @@ struct StatusView: View {
                     )
                 }
                 updateBlockRow(snapshot.updateBlocked)
+                StatusRow(
+                    title: "Controller permission",
+                    value: "Clear Steam's controller permission so macOS asks for it again.",
+                    action: StatusAction(
+                        label: "Reset",
+                        isEnabled: status.isIdle
+                    ) { Task { await status.resetControllerPermission() } }
+                )
             }
 
             Section {
-                crossOverRows(snapshot)
-                runnerRow(snapshot.runner, payload: snapshot.payload)
-                if snapshot.installedRunners.count > 1 || !snapshot.orphanedRunners.isEmpty
-                    || !snapshot.damagedRunners.isEmpty || !status.availableBuilds.isEmpty {
-                    buildRows(snapshot)
-                }
+                crossOverSection(snapshot)
             } header: {
-                Text("Compatibility Tool")
+                Text("CrossOver")
             } footer: {
-                if status.usableCrossOvers.count > 1 {
-                    HStack {
-                        Spacer()
-                        crossOverLink
-                    }
+                HStack {
+                    Spacer()
+                    Button("Add CrossOver\u{2026}") { Task { await status.addCrossOver() } }
+                        .disabled(!status.isIdle)
+                        .help("Add a copy of CrossOver from another folder.")
                 }
             }
 
@@ -297,8 +354,6 @@ struct StatusView: View {
             dangerSection
         }
         .formStyle(.grouped)
-        .frame(maxWidth: 680)
-        .frame(maxWidth: .infinity)
     }
 
     private var dangerSection: some View {
@@ -331,18 +386,69 @@ struct StatusView: View {
         .disabled(!status.isIdle)
     }
 
-    private func installAction(prominent: Bool) -> StatusAction {
+    private func installAction(prominent: Bool, label: String = "Install") -> StatusAction {
         StatusAction(
-            label: "Install",
+            label: label,
             isProminent: prominent,
             help: "Install the bundled NotProton component into Steam.",
-            isEnabled: status.isIdle
+            isEnabled: status.canInstall
         ) {
             Task { await status.requestInstall() }
         }
     }
 
+    @ViewBuilder
     private func steamRow(_ deployment: SteamDeployment, payload: PayloadState) -> some View {
+        switch deployment {
+        case .notInstalled:
+            if let content = status.snapshot?.installContent, content.blocksInstallation {
+                installedContentRow(content, deployment: deployment, payload: payload)
+            } else {
+                deploymentRow(deployment, payload: payload)
+            }
+        case .installed, .outdated:
+            if let content = status.snapshot?.installContent, content != .unchecked {
+                installedContentRow(content, deployment: deployment, payload: payload)
+            } else {
+                deploymentRow(deployment, payload: payload)
+            }
+        default:
+            deploymentRow(deployment, payload: payload)
+        }
+    }
+
+    @ViewBuilder
+    private func installedContentRow(_ content: DeploymentContent.Status, deployment: SteamDeployment, payload: PayloadState) -> some View {
+        switch content {
+        case .unchecked, .current:
+            let version: String? = switch deployment {
+            case .installed(let version): version
+            case .outdated(let deployed, _): deployed
+            default: nil
+            }
+            deploymentRow(.installed(version: version), payload: payload)
+        case .newerInstalled:
+            StatusRow(title: "NotProton", tone: .neutral)
+        case .unavailable(let reason):
+            StatusRow(title: "NotProton", tone: .warning)
+                .help(reason)
+        case .update(let files):
+            StatusRow(title: "NotProton", tone: .warning,
+                      action: installAction(prominent: true, label: "Update"))
+                .help(files.joined(separator: "\n"))
+        case .repair(let files):
+            StatusRow(title: "NotProton", tone: .warning,
+                      action: installAction(prominent: true, label: "Repair"))
+                .help(files.joined(separator: "\n"))
+        case .unrecorded(let files):
+            StatusRow(title: "NotProton", tone: .warning,
+                      action: installAction(prominent: true, label: "Update"))
+                .help(files.joined(separator: "\n"))
+        }
+    }
+
+    @ViewBuilder
+    private func deploymentRow(_ deployment: SteamDeployment, payload: PayloadState) -> some View {
         switch deployment {
         case .steamMissing:
             StatusRow(title: "NotProton", tone: .bad)
@@ -380,19 +486,13 @@ struct StatusView: View {
     }
 
     private func updateBlockRow(_ blocked: Bool) -> some View {
-        Toggle(isOn: blockUpdates) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Block Steam client updates")
-                    .font(.headline)
-                Text(
-                    blocked
-                        ? "The Steam client will not update itself."
-                        : "A Steam client update may break NotProton."
-                )
-                .foregroundStyle(.secondary)
-            }
-            .padding(.leading, StatusMetrics.textInset)
-        }
+        StatusRow(
+            title: "Block Steam client updates",
+            value: blocked
+                ? "The Steam client will not update itself."
+                : "A Steam client update may break NotProton.",
+            toggle: blockUpdates
+        )
         .disabled(!status.isIdle)
         .help("Steam client updates may break NotProton.")
     }
@@ -413,209 +513,174 @@ struct StatusView: View {
     // One copy keeps the choose button on its row. With several, each row sets up
     // its own build and choosing moves to the section footer.
     @ViewBuilder
-    private func crossOverRows(_ snapshot: StatusSnapshot) -> some View {
-        let installs = snapshot.crossOver.filter(\.isUsable)
-        if !installs.isEmpty {
-            ForEach(installs) { install in
-                if case .supported(let build) = install.support {
-                    StatusRow(
-                        title: install.name,
-                        value: "Build \(build.displayVersion)",
-                        tone: snapshot.crossOverLicense[install.id]?.licensed == true ? .ok : .warning,
-                        detail: install.bundle.path(percentEncoded: false),
-                        action: installs.count > 1
-                            ? setUpAction(for: install, build: build, snapshot: snapshot)
-                            : crossOverAction()
-                    )
-                }
-            }
-        } else {
+    private func crossOverSection(_ snapshot: StatusSnapshot) -> some View {
+        let rows = status.crossOverRows
+        if rows.isEmpty {
             StatusRow(
                 title: "CrossOver",
                 value: "Not found. Supported: \(SupportedRunners.versionList).",
-                tone: .bad,
-                action: crossOverAction()
+                tone: .bad
             )
         }
-    }
-
-    private func crossOverAction(chooseLabel: String = "Choose\u{2026}") -> StatusAction {
-        if status.chosenCrossOver != nil {
-            return StatusAction(
-                label: "Use Search",
-                help: "Use the default CrossOver.",
-                isEnabled: status.isIdle
-            ) { Task { await status.clearCrossOverChoice() } }
-        }
-        return StatusAction(
-            label: chooseLabel,
-            help: "Pick a CrossOver install.",
-            isEnabled: status.isIdle
-        ) { Task { await status.chooseCrossOver() } }
-    }
-
-    @ViewBuilder
-    private var crossOverLink: some View {
-        let action = crossOverAction(chooseLabel: "Choose Another Copy\u{2026}")
-        Button(action.label, action: action.perform)
-            .buttonStyle(.link)
-            .disabled(!action.isEnabled)
-            .help(action.help ?? "")
-    }
-
-    private func setUpAction(
-        for install: CrossOverInstall, build: RunnerBuild, snapshot: StatusSnapshot
-    ) -> StatusAction? {
-        guard !snapshot.installedRunners.contains(build) else { return nil }
-        return StatusAction(
-            label: "Set Up",
-            isProminent: snapshot.runner == .none,
-            help: "Set up the compatibility tool from \(install.name).",
-            isEnabled: status.isIdle
-        ) {
-            Task { await status.requestCompatibilityTool(from: install) }
-        }
-    }
-
-    @ViewBuilder
-    private func buildRows(_ snapshot: StatusSnapshot) -> some View {
-        let active = snapshot.runner.buildIdentifier
-        ForEach(SupportedRunners.all) { build in
-            if snapshot.installedRunners.contains(build) {
-                let isActive = build.id == active
-                StatusRow(
-                    title: build.displayVersion,
-                    value: isActive ? "Active build." : buildSize(build.id),
-                    tone: isActive ? .ok : .neutral,
-                    secondaryAction: isActive ? nil : removeAction(build.id),
-                    action: isActive ? nil : useAction(build)
-                )
-            } else if snapshot.damagedRunners.contains(build.id) {
-                StatusRow(
-                    title: build.displayVersion,
-                    value: "Damaged Copy",
-                    tone: .warning,
-                    detail: buildSize(build.id),
-                    secondaryAction: removeAction(build.id),
-                    action: status.availableBuilds.first(where: { $0.id == build.id })
-                        .map(copyAction)
-                )
-            } else if let available = status.availableBuilds.first(where: { $0.id == build.id }) {
-                StatusRow(
-                    title: build.displayVersion,
-                    tone: .neutral,
-                    action: copyAction(available)
-                )
-            }
-        }
-        ForEach(snapshot.orphanedRunners, id: \.self) { build in
+        let tools = SupportedRunners.tools(for: snapshot.installedRunners)
+        ForEach(rows) { row in
             StatusRow(
-                title: SupportedRunners.displayVersion(forID: build),
-                value: "No longer supported.",
+                title: row.title,
+                value: crossOverValue(row),
+                tone: crossOverTone(row),
+                detail: crossOverDetail(row, tools: tools),
+                trailing: row.copy == .ready ? buildSize(row.buildID) : nil,
+                action: crossOverAction(row, prominent: snapshot.runner == .none),
+                menu: crossOverMenu(row)
+            )
+            .background {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.accentColor.opacity(0.2))
+                    .padding(-6)
+                    .opacity(status.highlightedRow == row.id ? 1 : 0)
+            }
+            .animation(.easeInOut(duration: 0.3), value: status.highlightedRow == row.id)
+            .id(row.id)
+        }
+        if case .ready = snapshot.runner, !snapshot.payload.missing(origin: .patched).isEmpty {
+            StatusRow(
+                title: "Compatibility Tool",
+                value: "Patched components are missing.",
                 tone: .warning,
-                detail: buildSize(build),
-                secondaryAction: removeAction(build)
+                action: StatusAction(
+                    label: "Repair",
+                    isProminent: true,
+                    help: "Set up the compatibility tool again.",
+                    isEnabled: status.isIdle && status.setupSource != nil
+                ) { Task { await status.requestCompatibilityTool() } }
             )
         }
+    }
+
+    private func crossOverValue(_ row: CrossOverRow) -> String {
+        if let version = row.unsupportedVersion {
+            return "Version \(version) not supported (supported: \(SupportedRunners.versionList))"
+        }
+        let build = "Build \(SupportedRunners.displayVersion(forID: row.buildID))"
+        switch row.copy {
+        case .ready: return build
+        case .none: return build + (row.licensed == false ? ", not set up or activated" : ", not set up")
+        case .unpatched: return build + ", not patched"
+        case .damaged: return build + ", copy damaged"
+        case .unsupported: return build + ", not supported"
+        }
+    }
+
+    private func crossOverTone(_ row: CrossOverRow) -> StatusTone {
+        if row.unsupportedVersion != nil { return .neutral }
+        switch row.copy {
+        case .none: return row.licensed == false ? .warning : .neutral
+        case .ready: return .ok
+        case .unpatched, .damaged, .unsupported: return .warning
+        }
+    }
+
+    private func crossOverDetail(_ row: CrossOverRow, tools: [InstalledTool]) -> String? {
+        var lines: [String] = []
+        if row.copy == .ready || row.copy == .unpatched {
+            let names = tools.filter { $0.build == row.buildID }.map(\.display)
+            lines.append(contentsOf: names)
+        }
+        if row.copy == .none, row.licensed == false { lines.append("Open CrossOver to activate it.") }
+        if let install = row.install {
+            var path = install.bundle.path(percentEncoded: false)
+            if path.count > 1, path.hasSuffix("/") { path.removeLast() }
+            lines.append(path)
+        } else if row.copy != .unsupported {
+            lines.append("CrossOver app not found.")
+        }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+
+    private func crossOverAction(_ row: CrossOverRow, prominent: Bool) -> StatusAction? {
+        let install = row.install
+        switch row.copy {
+        case .none where row.canSetUp:
+            return StatusAction(
+                label: "Set Up",
+                isProminent: prominent,
+                help: "Copy \(row.title) and set up its compatibility tool.",
+                isEnabled: status.canInstall
+            ) { Task { await status.requestCompatibilityTool(from: install) } }
+        case .unpatched where row.canSetUp, .damaged where row.canSetUp:
+            return StatusAction(
+                label: "Repair",
+                isProminent: true,
+                help: "Copy \(row.title) again.",
+                isEnabled: status.canInstall
+            ) { Task { await status.requestCompatibilityTool(from: install) } }
+        case .unsupported:
+            return removeCopyAction(row.buildID, label: "Remove\u{2026}")
+        default:
+            return nil
+        }
+    }
+
+    private func crossOverMenu(_ row: CrossOverRow) -> [StatusAction] {
+        var items: [StatusAction] = []
+        let install = row.install
+        if row.copy == .ready {
+            items.append(StatusAction(
+                label: "Reinstall",
+                help: "Copy \(row.title) again.",
+                isEnabled: status.canInstall && row.canSetUp
+            ) { Task { await status.requestCompatibilityTool(from: install, replacingExisting: true) } })
+        }
+        let shown = install?.bundle
+            ?? (row.copy == .none ? nil : SupportPaths.runnerRoot(forBuild: row.buildID))
+        if let shown {
+            items.append(StatusAction(label: "Show in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([shown])
+            })
+        }
+        if [.ready, .unpatched, .damaged].contains(row.copy) {
+            var remove = removeCopyAction(row.buildID, label: "Remove Copy\u{2026}")
+            remove.startsGroup = true
+            items.append(remove)
+        }
+        if let install, row.isManual {
+            items.append(StatusAction(
+                label: "Remove from List",
+                isEnabled: status.isIdle,
+                startsGroup: !items.contains(where: \.startsGroup)
+            ) { Task { await status.removeFromList(install) } })
+        }
+        return items
     }
 
     private func buildSize(_ build: String) -> String? {
-        status.runnerSizes[build].map {
-            ByteCountFormatter.string(fromByteCount: $0, countStyle: .file)
-        }
+        guard let runner = status.runnerSizes[build] else { return nil }
+        let flavors = SupportedRunners.build(id: build)?.tools.map(\.flavor) ?? []
+        return Self.sizeText(runner: runner, templates: status.templateSizes[build] ?? [:], flavors: flavors)
     }
 
-    private func copyAction(_ available: SystemStatus.AvailableBuild) -> StatusAction {
-        StatusAction(
-            label: "Copy",
-            isProminent: true,
-            help: "Copy this CrossOver build and use it.",
-            isEnabled: status.isIdle
-        ) {
-            Task { await status.requestCompatibilityTool(from: available.install) }
+    nonisolated static func sizeText(runner: Int64, templates: [CompatTool.Flavor: Int64], flavors: [CompatTool.Flavor]) -> String {
+        let lines: [String]
+        if flavors.count > 1 {
+            lines = flavors.compactMap { flavor in
+                guard let bytes = templates[flavor], bytes > 0 else { return nil }
+                return "\(flavor.name) templates \(bytes.formatted(.byteCount(style: .file)))"
+            }
+        } else {
+            let bytes = templates.values.reduce(0, +)
+            lines = bytes > 0 ? ["Templates \(bytes.formatted(.byteCount(style: .file)))"] : []
         }
+        return (["Runner \(runner.formatted(.byteCount(style: .file)))"] + lines).joined(separator: "\n")
     }
 
-    private func useAction(_ build: RunnerBuild) -> StatusAction {
-        StatusAction(
-            label: "Use",
-            help: "Launch games with this CrossOver build.",
-            isEnabled: status.isIdle
-        ) {
-            Task { await status.switchRunner(to: build) }
-        }
-    }
-
-    private func removeAction(_ build: String) -> StatusAction {
-        StatusAction(
-            label: "Remove",
-            role: .destructive,
-            help: "Delete this build from disk.",
-            isEnabled: status.isIdle
-        ) {
-            status.requestBuildRemoval(build)
-        }
-    }
-
-    private func runnerAction(
-        label: String = "Set Up", replacingExisting: Bool = false
-    ) -> StatusAction {
+    private func removeCopyAction(_ build: String, label: String) -> StatusAction {
         StatusAction(
             label: label,
-            isProminent: true,
-            help: "Set up the compatibility tool from CrossOver.",
-            isEnabled: status.isIdle && status.setupSource != nil
+            role: .destructive,
+            help: "Delete NotProton's copy of this build.",
+            isEnabled: status.canInstall
         ) {
-            Task { await status.requestCompatibilityTool(replacingExisting: replacingExisting) }
-        }
-    }
-
-    private func runnerRow(_ state: RunnerState, payload: PayloadState) -> some View {
-        let patchedMissing = !payload.missing(origin: .patched).isEmpty
-
-        switch state {
-        case .none:
-            return StatusRow(
-                title: "Compatibility Tool",
-                value: "Not set up.",
-                tone: .neutral,
-                action: status.crossOverRowsOfferSetUp ? nil : runnerAction()
-            )
-        case .cloned(let build, let supported):
-            let satisfied = supported && !patchedMissing
-            let deployed = status.setupSourceIsDeployed
-            return StatusRow(
-                title: "Compatibility Tool",
-                value: "Build \(SupportedRunners.displayVersion(forID: build))"
-                    + (supported ? "" : " (unsupported)"),
-                tone: satisfied ? .ok : .warning,
-                action: satisfied
-                    ? runnerAction(
-                        label: deployed ? "Copy Again" : "Copy", replacingExisting: true
-                    )
-                    : runnerAction()
-            )
-        case .unpatched(let build, _):
-            return StatusRow(
-                title: "Compatibility Tool",
-                value: "Build \(SupportedRunners.displayVersion(forID: build)), not patched.",
-                tone: .warning,
-                action: runnerAction()
-            )
-        case .bundleShaped(let build):
-            return StatusRow(
-                title: "Compatibility Tool",
-                value: "Build \(SupportedRunners.displayVersion(forID: build)), needs re-setup.",
-                tone: .warning,
-                action: runnerAction()
-            )
-        case .broken:
-            return StatusRow(
-                title: "Compatibility Tool",
-                value: "Unusable.",
-                tone: .bad,
-                action: runnerAction()
-            )
+            status.requestBuildRemoval(build)
         }
     }
 
@@ -624,7 +689,7 @@ struct StatusView: View {
             label: "Fetch Valve Binaries",
             isProminent: true,
             help: "Download missing Valve binaries.",
-            isEnabled: status.isIdle
+            isEnabled: status.canInstall
         ) { Task { await status.fetchValveBinaries() } }
     }
 
@@ -636,7 +701,11 @@ struct StatusView: View {
             }
         } else if payload.isComplete {
             Section("NotProton Components") {
-                StatusRow(title: "Components", value: "Ready.", tone: .ok)
+                StatusRow(
+                    title: "Components", value: "Ready.", tone: .ok,
+                    trailing: status.bridgeCopyBytes > 0
+                        ? "Copies on other drives \(status.bridgeCopyBytes.formatted(.byteCount(style: .file)))" : nil
+                )
             }
         } else if payload.isEmpty {
             Section("NotProton Components") {
@@ -649,7 +718,7 @@ struct StatusView: View {
                         URL(filePath: $0.path).lastPathComponent
                     }.joined(separator: ", ")
                     StatusRow(
-                        title: "Missing",
+                        title: "Missing.",
                         value: names,
                         tone: .bad,
                         action: payload.missing.contains(where: { $0.origin.isFetchable })

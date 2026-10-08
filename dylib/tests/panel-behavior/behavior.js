@@ -9,7 +9,7 @@ let failed = 0;
 for (const form of Object.keys(FORMS)) {
   const { render: P, written } = panel(emit, form);
   const t = runner(form);
-  const nodes = opts => walk(P({ details: details(opts) }));
+  const nodes = opts => walk(P({ details: details(opts + ' %command%') }));
   const toggles = ns => ns.filter(x => x.type === 'Toggle').map(x => x.props.label);
   const sections = ns => ns.filter(x => x.type === 'Section').map(x => x.props.label.split(' ')[0]);
   const last = () => (written.length ? written[written.length - 1].opts : '');
@@ -21,7 +21,7 @@ for (const form of Object.keys(FORMS)) {
        'a shortcut renders the panel before a tool name reaches the page');
 
   let r = nodes('');
-  t.ok(toggles(r).length === 5 && sections(r).length === 2, 'automatic shows five toggles in two sections');
+  t.ok(toggles(r).length === 6 && sections(r).length === 3, 'automatic shows six toggles in three sections');
   t.ok(r.filter(x => x.type === 'Dropdown').length === 2, 'two dropdowns');
   t.ok(!('label' in r.find(x => x.type === 'Dropdown').props), 'the backend dropdown carries no label column');
 
@@ -79,7 +79,19 @@ for (const form of Object.keys(FORMS)) {
   const root = P({ details: details('') });
   t.ok(root.props.className === 'MSCXPanel', 'the panel root carries its own class');
   const classes = nodes('').filter(x => x.type === 'Toggle').map(x => x.props.className);
-  t.ok(classes.length === 5 && classes.every(c => c === 'MSCXRow'), 'every checkbox carries the row class');
+  t.ok(classes.length === 6 && classes.every(c => c === 'MSCXRow'), 'every checkbox carries the row class');
+  const raw = o => nodes(o).find(x => x.props.label === 'Let games read controllers directly');
+  t.ok(sections(nodes('')).includes('Controllers') && raw('').props.checked === false,
+       'controller hiding is on unless the game says otherwise');
+  t.ok(nodes('').some(x => x.type === 'Section' && x.props.label === 'Controllers (May break Steam Input. Not recommended)'),
+       'the controller section warns what the row changes');
+  written.length = 0;
+  raw('').props.onChange(true);
+  t.ok(last().trim() === 'NOTPROTON_RAW_CONTROLLERS=1 %command%', `the controller row writes its flag (${last()})`);
+  t.ok(raw('NOTPROTON_RAW_CONTROLLERS=1').props.checked === true, 'the controller row reads its flag');
+  written.length = 0;
+  raw('NOTPROTON_RAW_CONTROLLERS=1 WINEMSYNC=1').props.onChange(false);
+  t.ok(last().trim() === 'WINEMSYNC=1 %command%', `turning the controller row off removes its flag (${last()})`);
   const css = nodes('').filter(x => x.type === 'style');
   t.ok(css.length === 1 && css[0].props.children.includes('.MSCXPanel .MSCXRow{'),
        'the panel carries one stylesheet defining the row rule');

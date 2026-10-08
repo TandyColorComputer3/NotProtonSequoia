@@ -15,6 +15,10 @@ static void call(size_t off, size_t target) {
     word(off, 0x94000000u | (uint32_t)(((target - off) / 4) & 0x03FFFFFFu));
 }
 
+static void branch(size_t off, size_t target) {
+    word(off, 0x14000000u | (uint32_t)(((target - off) / 4) & 0x03FFFFFFu));
+}
+
 static void starts(const char bytes[7]) {
     memcpy(image + 0x2200, bytes, 7);
 }
@@ -111,6 +115,33 @@ static void check(const char *label, int exact, uintptr_t expected) {
            (unsigned long)expected, (unsigned long)got);
 }
 
+static void needle_ref_at(size_t off) {
+    word(off, 0xB0000000);
+    word(off + 4, 0x91240400);
+}
+
+static void four_functions(void) {
+    starts("\x80\x08\x80\x09\x80\x01\x7c");
+    memcpy(image + 0x1901, "needle", 7);
+    word(0x880, 0xD503201F);
+    word(0x900, 0xD10043FF);
+    word(0x974, 0x910043FF);
+    word(0x978, 0xD65F03C0);
+}
+
+static void check_string(const char *label, int hops, int tail, uintptr_t expected) {
+    np_anchor_t anchor = {.kind = NP_MATCH_STRING, .caller_hops = hops, .caller_tail = tail};
+    strcpy(anchor.str, "needle");
+    uintptr_t base = (uintptr_t)image;
+    uintptr_t got = np_locate_anchor((void *)image, (intptr_t)base, base, 0x2000, &anchor);
+    if (got) got -= base;
+    cases++;
+    if (got == expected) return;
+    failures++;
+    printf("FAIL %s: expected 0x%lx, got 0x%lx\n", label,
+           (unsigned long)expected, (unsigned long)got);
+}
+
 int main(void) {
     reset();
     check("exact match spanning more than 0x400 bytes", 1, 0x400);
@@ -194,10 +225,49 @@ int main(void) {
     starts("\x80\x08\x82\x09\x80\x07");
     check("misaligned function bounds", 1, 0);
 
+    reset(); four_functions();
+    needle_ref_at(0x888);
+    check_string("string in a frameless function after a framed one", 0, 0, 0x880);
+
+    reset(); four_functions();
+    needle_ref_at(0x910);
+    check_string("string in a framed function", 0, 0, 0x900);
+
+    reset(); four_functions();
+    split_prologue_at_400();
+    needle_ref_at(0x500);
+    check_string("string past a split prologue", 0, 0, 0x400);
+
+    reset(); four_functions();
+    needle_ref_at(0x990);
+    check_string("string in the unbounded last function", 0, 0, 0);
+
+    reset(); four_functions();
+    needle_ref_at(0x910);
+    call(0x88C, 0x900);
+    check_string("frameless caller after a framed function", 1, 0, 0x880);
+
+    reset(); four_functions();
+    needle_ref_at(0x910);
+    branch(0x88C, 0x900);
+    branch(0x920, 0x900);
+    check_string("frameless tail caller and a branch back to the callee entry", 1, 1, 0x880);
+
+    reset(); four_functions();
+    needle_ref_at(0x910);
+    call(0x88C, 0x900);
+    call(0x40C, 0x900);
+    check_string("two callers", 1, 0, 0);
+
+    reset(); four_functions();
+    needle_ref_at(0x910);
+    call(0x990, 0x900);
+    check_string("caller in the unbounded last function", 1, 0, 0);
+
     if (failures) {
-        printf("%d of %d call-shape cases failed\n", failures, cases);
+        printf("%d of %d anchor cases failed\n", failures, cases);
         return 1;
     }
-    printf("==> %d call-shape cases resolve as expected\n", cases);
+    printf("==> %d anchor cases resolve as expected\n", cases);
     return 0;
 }

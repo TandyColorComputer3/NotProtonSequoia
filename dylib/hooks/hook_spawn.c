@@ -1,4 +1,4 @@
-// Strips DYLD_INSERT_LIBRARIES from child processes
+// Strips DYLD_INSERT_LIBRARIES and the SDL block list from child processes
 #include "hooks.h"
 #include "../util/log.h"
 
@@ -20,8 +20,20 @@ static fn_execve      orig_execve;
 static fn_posix_spawn orig_posix_spawn;
 static fn_posix_spawn orig_posix_spawnp;
 
-#define NP_INSERT_KEY     "DYLD_INSERT_LIBRARIES="
-#define NP_INSERT_KEY_LEN (sizeof(NP_INSERT_KEY) - 1)
+// The SDL block list stops Steam from seeing a second, generic copy of the Steam Controller.
+// This solves double input issues.
+static const char *const np_steam_only_keys[] = {
+    "DYLD_INSERT_LIBRARIES=",
+    "SDL_JOYSTICK_BLACKLIST_DEVICES=",
+};
+
+static int np_is_steam_only(const char *entry) {
+    for (size_t k = 0; k < sizeof(np_steam_only_keys) / sizeof(np_steam_only_keys[0]); k++) {
+        if (strncmp(entry, np_steam_only_keys[k], strlen(np_steam_only_keys[k])) == 0)
+            return 1;
+    }
+    return 0;
+}
 
 // steam_osx re-execs itself and needs the insert for hooks. Steam Helper runs
 // CEF and needs it for the webpatch fopen interpose, strips elsewhere
@@ -41,7 +53,7 @@ static char **np_without_insert(char *const envp[]) {
     int count = 0;
     int found = 0;
     for (int i = 0; envp[i]; i++) {
-        if (strncmp(envp[i], NP_INSERT_KEY, NP_INSERT_KEY_LEN) == 0)
+        if (np_is_steam_only(envp[i]))
             found = 1;
         count++;
     }
@@ -56,7 +68,7 @@ static char **np_without_insert(char *const envp[]) {
 
     int j = 0;
     for (int i = 0; envp[i]; i++) {
-        if (strncmp(envp[i], NP_INSERT_KEY, NP_INSERT_KEY_LEN) != 0)
+        if (!np_is_steam_only(envp[i]))
             clean[j++] = envp[i];
     }
     clean[j] = NULL;

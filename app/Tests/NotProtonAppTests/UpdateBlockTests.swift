@@ -6,15 +6,9 @@ import Testing
 @Suite("Update block")
 struct UpdateBlockTests {
 
-    private func scratch() throws -> URL {
-        let url = URL.temporaryDirectory.appending(path: "np-cfg-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
-    }
-
     @Test("Writing the block writes the required copy and the best-effort one")
     func writesBothCopies() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("cfg")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let required = work.appending(path: "Steam/steam.cfg")
@@ -36,7 +30,7 @@ struct UpdateBlockTests {
     // client is not installed, which is worse than not writing the best-effort copy.
     @Test("The best-effort copy is skipped when the client directory is not there")
     func skipsBestEffortWhenDirectoryAbsent() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("cfg")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let required = work.appending(path: "Steam/steam.cfg")
@@ -53,7 +47,7 @@ struct UpdateBlockTests {
 
     @Test("Presence is decided by the required copy only")
     func presenceFollowsRequiredCopy() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("cfg")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let required = work.appending(path: "steam.cfg")
@@ -70,7 +64,7 @@ struct UpdateBlockTests {
 
     @Test("Removing the block takes every copy it finds and ignores the rest")
     func removesEveryCopy() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("cfg")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let present = work.appending(path: "steam.cfg")
@@ -86,7 +80,7 @@ struct UpdateBlockTests {
 
     @Test("Writing over an existing block leaves one block, not two")
     func writeIsIdempotent() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("cfg")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let required = work.appending(path: "steam.cfg")
@@ -101,7 +95,7 @@ struct UpdateBlockTests {
     // config that turns it off read as one that turns it on.
     @Test("The key set to anything but enable is not a block")
     func disabledKeyIsNotABlock() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("cfg")
         defer { try? FileManager.default.removeItem(at: work) }
         let cfg = work.appending(path: "steam.cfg")
 
@@ -121,7 +115,7 @@ struct UpdateBlockTests {
     // block deleted it, either of which threw away settings nothing to do with NotProton.
     @Test("Blocking and unblocking leave the rest of the file alone")
     func otherSettingsSurvive() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("cfg")
         defer { try? FileManager.default.removeItem(at: work) }
         let cfg = work.appending(path: "steam.cfg")
         try Data("BootStrapperInhibitAll=enable\nSomethingElse=1\n".utf8).write(to: cfg)
@@ -141,7 +135,7 @@ struct UpdateBlockTests {
     // second one under it, since the last line is the one that counts.
     @Test("Blocking replaces a line that turned the block off")
     func blockingReplacesADisabledLine() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("cfg")
         defer { try? FileManager.default.removeItem(at: work) }
         let cfg = work.appending(path: "steam.cfg")
         try Data("BootStrapperInhibitUpdateOnLaunch=disable\nOther=2\n".utf8).write(to: cfg)
@@ -154,7 +148,7 @@ struct UpdateBlockTests {
 
     @Test("A file holding nothing but the block is removed with it")
     func aFileOfOnlyTheBlockGoes() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("cfg")
         defer { try? FileManager.default.removeItem(at: work) }
         let cfg = work.appending(path: "steam.cfg")
 
@@ -168,7 +162,7 @@ struct UpdateBlockTests {
     // A file the block was never in is not a file this changed, so repair does not report it.
     @Test("A file without the block is left as it is")
     func aFileWithoutTheBlockIsUntouched() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("cfg")
         defer { try? FileManager.default.removeItem(at: work) }
         let cfg = work.appending(path: "steam.cfg")
         try Data("Other=2\n".utf8).write(to: cfg)

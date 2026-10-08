@@ -15,6 +15,11 @@
 #define NP_C8 "\010"
 #define NP_CAP_MAX 8
 
+// Stands for the name set by np_webpatch_set_fallback_tool.
+#define NP_FALLBACK_TOOL "\021"
+
+static _Thread_local char g_fallback_tool[128];
+
 typedef struct {
     const char *find;
     const char *replace;
@@ -32,12 +37,29 @@ static int cap_index(unsigned char c) {
     return (c >= 1 && c <= NP_CAP_MAX) ? c - 1 : -1;
 }
 
+void np_webpatch_set_fallback_tool(const char *name) {
+    g_fallback_tool[0] = '\0';
+    if (!name) return;
+    size_t n = strlen(name);
+    if (n >= sizeof(g_fallback_tool)) return;
+    for (size_t i = 0; i < n; i++)
+        if (!is_ident_char((unsigned char)name[i]) && name[i] != '.' && name[i] != '-')
+            return;
+    memcpy(g_fallback_tool, name, n + 1);
+}
+
 static size_t match_at(const char *src, size_t len, size_t pos,
                        const char *find, np_cap_t *caps) {
     for (int i = 0; i < NP_CAP_MAX; i++) { caps[i].at = NULL; caps[i].len = 0; }
 
     size_t s = pos;
     for (const char *f = find; *f; f++) {
+        if (*f == NP_FALLBACK_TOOL[0]) {
+            size_t n = strlen(g_fallback_tool);
+            if (s + n > len || memcmp(src + s, g_fallback_tool, n) != 0) return 0;
+            s += n;
+            continue;
+        }
         int ci = cap_index((unsigned char)*f);
         if (ci < 0) {
             if (s >= len || src[s] != *f) return 0;
@@ -93,6 +115,10 @@ static int out_put(np_out_t *o, const char *p, size_t n) {
 
 static int out_expand(np_out_t *o, const char *replace, const np_cap_t *caps) {
     for (const char *r = replace; *r; r++) {
+        if (*r == NP_FALLBACK_TOOL[0]) {
+            if (!out_put(o, g_fallback_tool, strlen(g_fallback_tool))) return 0;
+            continue;
+        }
         int ci = cap_index((unsigned char)*r);
         if (ci < 0) {
             if (!out_put(o, r, 1)) return 0;
@@ -103,6 +129,35 @@ static int out_expand(np_out_t *o, const char *replace, const np_cap_t *caps) {
     }
     return 1;
 }
+
+// Finds the launch options set before %command%.
+#define NP_CX_LAUNCH_PARSE \
+    "E=(()=>{let i=0,c=[];const cs=[c]," \
+    "qs=x=>{while(i<o.length&&o[i]!==x)i+=x!==\"'\"&&o[i]==='\\\\'?2:1;i++}," \
+    "nest=(a,b)=>{for(let d=1;i<o.length&&d;){const x=o[i++];" \
+    "if(x==='\\\\')i++;else if(\"'\\\"`\".includes(x))qs(x);else if(x===a)d++;else if(x===b)d--}}," \
+    "wd=()=>{const s=i;let v=\"\",q=0,l=1;while(i<o.length){const x=o[i];" \
+    "if(q===39){if(x===\"'\")q=0;else v+=x;i++;continue}" \
+    "if(x==='\\\\'){const n=o[i+1]||\"\";if(q&&!'\"\\\\$`\\n'.includes(n)){v+=x;i++;continue}" \
+    "if(n!=='\\n')v+=n;i+=2;continue}" \
+    "if(x==='\"'){q=q?0:34;i++;continue}" \
+    "if(!q&&' \\t\\n;&|<>()'.includes(x))break;" \
+    "if(!q&&x===\"'\"){q=39;i++;continue}" \
+    "if(x==='`'){l=0;i++;qs(x);continue}" \
+    "if(x==='$'){l=0;const n=o[i+1];if(n==='('||n==='{'){i+=2;nest(n,n==='('?')':'}');continue}}" \
+    "v+=x;i++}return{start:s,end:i,value:l?v:null}};" \
+    "while(i<o.length){const x=o[i],r=/^(<<-|<<|>>|<&|>&|<>|>\\||&>>|&>|<|>)/.exec(o.slice(i));" \
+    "if(x===' '||x==='\\t')i++;" \
+    "else if(x==='\\\\'&&o[i+1]==='\\n')i+=2;" \
+    "else if(x==='#')while(i<o.length&&o[i]!=='\\n')i++;" \
+    "else if(r)i+=r[0].length;" \
+    "else if(';&|\\n()'.includes(x)){i++;cs.push(c=[])}" \
+    "else{const w=wd();if(!c.length&&/^(if|then|else|elif|do|while|until|!|\\{)$/" \
+    ".test(o.slice(w.start,w.end)))cs.push(c=[]);else c.push(w)}}" \
+    "const m=w=>/%command%/i.test(o.slice(w.start,w.end)),G=cs.find(c=>c.some(m));" \
+    "if(!G)return{p:0,e:[]};" \
+    "const n=G.findIndex(w=>m(w)||!/^[A-Za-z_]\\w*=/.test(o.slice(w.start,w.end)));" \
+    "return{p:G[0].start,e:G.slice(0,n<0?G.length:n)}})(),"
 
 // CrossOver options panel. Not in great shape, but it'll do
 #define NP_CX_OPTIONS_CSS \
@@ -115,10 +170,16 @@ static int out_expand(np_out_t *o, const char *replace, const np_cap_t *caps) {
 #define NP_CX_OPTIONS_BODY(ARG, RT, BARREL) \
     ARG "=>{" \
     "const t=" ARG ".details,o=t.strLaunchOptions||\"\"," \
-    "g=k=>{const p=o.split(\" \").find(x=>x.indexOf(k+\"=\")===0);return p?p.slice(k.length+1):\"\"}," \
-    "s=ps=>{const a=o.split(\" \").filter(x=>x&&!ps.some(p=>x.indexOf(p[0]+\"=\")===0));" \
-    "ps.forEach(p=>{if(p[1])a.unshift(p[0]+\"=\"+p[1])});" \
-    "SteamClient.Apps.SetAppLaunchOptions(t.unAppID,a.join(\" \"))}," \
+    NP_CX_LAUNCH_PARSE \
+    "g=k=>{const p=E.e.filter(w=>o.startsWith(k+\"=\",w.start)).pop();" \
+    "return p?(p.value===null?o.slice(p.start+k.length+1,p.end):p.value.slice(k.length+1)):\"\"}," \
+    "qv=v=>/^[\\w.,:=\\/+@%-]*$/.test(v)?v:\"'\"+v.replace(/'/g,\"'\\\\''\")+\"'\"," \
+    "s=ps=>{const add=ps.filter(p=>p[1]).map(p=>p[0]+\"=\"+qv(p[1])).join(\" \");let r;" \
+    "if(!/%command%/i.test(o)){if(!add)return;r=add+\" %command%\"+(o.trim()?\" \"+o:\"\")}" \
+    "else{let at=E.p;r=o.slice(0,at)+(add?add+\" \":\"\");" \
+    "E.e.forEach(w=>{if(ps.some(p=>o.startsWith(p[0]+\"=\",w.start))){" \
+    "r+=o.slice(at,w.start);at=w.end;while(o[at]===\" \"||o[at]===\"\\t\")at++}});r+=o.slice(at)}" \
+    "SteamClient.Apps.SetAppLaunchOptions(t.unAppID,r.trim()===\"%command%\"?\"\":r)}," \
     "T=(ks,l,on,off)=>(0," RT ".jsx)(" BARREL ".Yh,{className:\"MSCXRow\",label:l," \
     "checked:g(ks[0])===on," \
     "onChange:v=>s(ks.map(k=>[k,v?on:(off||\"\")]))},ks[0])," \
@@ -127,7 +188,11 @@ static int out_expand(np_out_t *o, const char *replace, const np_cap_t *caps) {
     "dx=\"\"===b||\"dxmt\"===b," \
     "sw=\"1\"===g(\"DXMT_METALFX_SPATIAL_SWAPCHAIN\")," \
     "F=\"d3d11.metalSpatialUpscaleFactor=\"," \
-    "cf=g(\"DXMT_CONFIG\")," \
+    "fe=g(\"DXMT_CONFIG\").split(\";\").filter(e=>e.trim())," \
+    "fk=e=>/^[ \\t\\r]*d3d11\\.metalSpatialUpscaleFactor[ \\t\\r]*=/.test(e)," \
+    "fx=v=>fe.filter(e=>!fk(e)).concat(v?[F+v]:[]).join(\";\")," \
+    "fv=(fe.filter(fk).pop()||\"=2\").replace(/^[^=]*=/,\"\").replace(/\"/g,\"\").trim().split(/\\s/)[0]," \
+    "fn=Math.max(isNaN(+fv)?2:+fv,1)," \
     "U=[{data:\"\",label:\"Off\"}," \
     "{data:\"1.5\",label:\"1.5x\"}," \
     "{data:\"1.72\",label:\"1.72x\"}," \
@@ -147,7 +212,7 @@ static int out_expand(np_out_t *o, const char *replace, const np_cap_t *caps) {
     "onChange:v=>s([[\"CX_GRAPHICS_BACKEND\",v.data]]" \
     ".concat(\"\"===v.data||\"d3dmetal\"===v.data?[]:[[\"D3DM_ENABLE_METALFX\",\"\"]])" \
     ".concat(\"\"===v.data||\"dxmt\"===v.data?[]:" \
-    "[[\"DXMT_METALFX_SPATIAL_SWAPCHAIN\",\"\"],[\"DXMT_CONFIG\",\"\"]])" \
+    "[[\"DXMT_METALFX_SPATIAL_SWAPCHAIN\",\"\"],[\"DXMT_CONFIG\",fx(\"\")]])" \
     ".concat(\"dxmt\"===v.data?[]:[[\"DXMT_ENABLE_NVEXT\",\"\"]]))})," \
     "T([\"MTL_HUD_ENABLED\"],\"Metal HUD\",\"1\")," \
     "dm&&T([\"D3DM_ENABLE_METALFX\"],\"DLSS\",\"1\")," \
@@ -159,9 +224,10 @@ static int out_expand(np_out_t *o, const char *replace, const np_cap_t *caps) {
     "dx&&(0," RT ".jsx)(" BARREL ".XY," \
     "{label:\"MetalFX Upscaling (Samples from the resolution the game is set to)\"," \
     "children:(0," RT ".jsx)(" BARREL ".m,{rgOptions:U," \
-    "selectedOption:sw?(0===cf.indexOf(F)?cf.slice(F.length):\"2.0\"):\"\"," \
-    "onChange:v=>s(v.data?[[\"DXMT_METALFX_SPATIAL_SWAPCHAIN\",\"1\"],[\"DXMT_CONFIG\",F+v.data]]" \
-    ":[[\"DXMT_METALFX_SPATIAL_SWAPCHAIN\",\"\"],[\"DXMT_CONFIG\",\"\"]])})},\"usf\")" \
+    "selectedOption:sw?(U.find(u=>u.data&&+u.data===fn)||{data:String(fn)}).data:\"\"," \
+    "onChange:v=>s([[\"DXMT_METALFX_SPATIAL_SWAPCHAIN\",v.data?\"1\":\"\"],[\"DXMT_CONFIG\",fx(v.data)]])})},\"usf\")," \
+    "(0," RT ".jsx)(" BARREL ".XY,{label:\"Controllers (May break Steam Input. Not recommended)\",children:" \
+    "T([\"NOTPROTON_RAW_CONTROLLERS\"],\"Let games read controllers directly\",\"1\",\"\")},\"ctl\")" \
     "]})})}"
 
 #define NP_CX_OPTIONS_COMPONENT \
@@ -170,6 +236,35 @@ static int out_expand(np_out_t *o, const char *replace, const np_cap_t *caps) {
 // Valve is testing a new compatibility page UI, this logic relates to supporting that
 #define NP_CX_OPTIONS_STATEMENT \
     "var MSCXOpts=" NP_CX_OPTIONS_BODY("np", NP_C3, NP_C4) ";"
+
+// 1.0.x saved CrossOver settings without %command%, this migrates them.
+#define NP_LAUNCH_MIGRATION_RULE \
+    "o=>{const T=/(?:[^\\s\"'\\\\]|\\\\[^]|\"(?:[^\"\\\\]|\\\\[^])*\"|'[^']*')+/g," \
+    "w=o.match(T)||[]," \
+    "k=x=>/^(CX_GRAPHICS|D3DM_|DXMT_|DXVK_|MTL_|NOTPROTON_|ROSETTA_|WINE)\\w*=/.test(x)," \
+    "e=w.filter(k);" \
+    "if(/%command%/i.test(o)||o.replace(T,\"\").trim()||!e.length)return null;" \
+    "return e.map(x=>{const i=x.indexOf(\"=\"),v=x.slice(i+1);" \
+    "return/[\"'\\\\]/.test(x)||/^[\\w.,:=\\/+@%-]*$/.test(v)?x:x.slice(0,i+1)+\"'\"+v+\"'\"})" \
+    ".concat(\"%command%\",w.filter(x=>!k(x))).join(\" \")}"
+
+#define NP_LAUNCH_MIGRATION \
+    "(async()=>{try{" \
+    "const K=\"NotProtonLaunchMigrated_\"+this.m_cm.steamid.GetAccountID();" \
+    "if(localStorage.getItem(K))return;" \
+    "const M=" NP_LAUNCH_MIGRATION_RULE ";" \
+    "const A=[...window.appStore.m_mapApps.values()].filter(a=>a);let n=0;" \
+    "for(let i=0;i<A.length;i+=20)await Promise.all(A.slice(i,i+20).map(async a=>{const id=a.appid;" \
+    "const t=await Promise.race([window.appDetailsStore.RequestAppDetails(id)," \
+    "new Promise(r=>setTimeout(r,5e3))]);" \
+    "if(!t){console.warn(\"NotProton: no details for app \"+id+\", its launch options were not moved\");return}" \
+    "if(!(id<2147483648&&(t.vecPlatforms||[]).indexOf(\"osx\")>=0&&!t.strCompatToolName)){" \
+    "const r=M(t.strLaunchOptions||\"\");" \
+    "if(r!==null){SteamClient.Apps.SetAppLaunchOptions(id,r);n++;" \
+    "console.log(\"NotProton: moved the launch options of app \"+id)}}}));" \
+    "console.log(\"NotProton: checked the launch options of \"+A.length+\" apps, moved \"+n);" \
+    "localStorage.setItem(K,\"1\")" \
+    "}catch(e){console.error(\"NotProton: launch options migration failed\",e)}})()"
 
 static const np_gate_t g_gates_forcetool[] = {
     // SteamPlay settings section
@@ -249,6 +344,27 @@ static const np_gate_t g_fixes[] = {
     { "{strFileTypeName:\"Image Files (*.tga,*.png)\",rFilePatterns:[\"*.tga\",\"*.png\"]}",
       "{strFileTypeName:\"Image Files (*.tga,*.png,*.exe)\","
       "rFilePatterns:[\"*.tga\",\"*.png\",\"*.exe\"]}", 1 },
+    // Makes Steam's default compatibility tool setting work
+    { "r=(0,s.q3)(()=>u.rV.settings.bCompatEnabled),a=function(e,t){const[r,i]=n.useState([]);"
+      "return n.useEffect(()=>{SteamClient.Apps.GetAvailableCompatTools(e).then(i)},[e,t]),r}"
+      "(t.unAppID,r),o=r&&!!t.strCompatToolName&&t.nCompatToolPriority==h.JN,"
+      "l=a.length?a[0].strToolName:\"\"",
+      "r=(0,s.q3)(()=>u.rV.settings.bCompatEnabled),a=function(e,t){const[r,i]=n.useState([]);"
+      "return n.useEffect(()=>{SteamClient.Apps.GetAvailableCompatTools(e).then(i)},[e,t]),r}"
+      "(t.unAppID,r),o=r&&!!t.strCompatToolName&&t.nCompatToolPriority==h.JN,"
+      "l=a.length?(a.find(e=>e.strToolName===u.rV.settings.strCompatTool)||a[0]).strToolName:\"\"",
+      1 },
+    // Shows the default tool picker before a default has been saved
+    { "return " NP_C1 "?(0," NP_C2 ".jsx)(" NP_C3 ".B,{feature:" NP_C4 ".OK,label:(0," NP_C5 ".we)"
+      "(\"#Settings_SteamPlay_DefaultTool\"),rgOptions:" NP_C6 ",disabled:0==" NP_C6 ".length,"
+      "selectedOption:" NP_C1 ",",
+      "return(" NP_C1 "||" NP_C6 ".some(e=>e.data===\"" NP_FALLBACK_TOOL "\"))?(0," NP_C2 ".jsx)("
+      NP_C3 ".B,{feature:" NP_C4 ".OK,label:(0," NP_C5 ".we)"
+      "(\"#Settings_SteamPlay_DefaultTool\"),rgOptions:" NP_C6 ",disabled:0==" NP_C6 ".length,"
+      "selectedOption:" NP_C1 "||\"" NP_FALLBACK_TOOL "\",",
+      1 },
+    { "this.m_bServicesInitialized=!0,SteamClient.UI.NotifyAppInitialized()",
+      "this.m_bServicesInitialized=!0," NP_LAUNCH_MIGRATION ",SteamClient.UI.NotifyAppInitialized()", 1 },
 };
 #define NP_FIX_COUNT (sizeof(g_fixes) / sizeof(g_fixes[0]))
 

@@ -41,6 +41,7 @@ typedef struct {
 static const np_hook_group_t np_groups[] = {
     { "compat", np_hooks_compat_count, np_hooks_compat_defs },
     { "webui",  np_hooks_webui_count,  np_hooks_webui_defs  },
+    { "launch", np_hooks_launch_count, np_hooks_launch_defs },
 };
 
 static const np_hook_group_t np_steamui_groups[] = {
@@ -59,10 +60,7 @@ static int np_apply_entry(np_resolve_result_t *resolved, const char *group,
     uintptr_t addr = e->address ? e->address
                    : e->signature ? np_lookup_address(resolved, e->signature) : 0;
     if (!addr) {
-        if (e->tolerate_missing)
-            NP_DBG("[%s] %s: unresolved (optional)", group, e->label);
-        else
-            NP_WARN("[%s] %s: unresolved, cannot install", group, e->label);
+        NP_WARN("[%s] %s: unresolved, cannot install", group, e->label);
         return 0;
     }
 

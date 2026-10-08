@@ -43,7 +43,8 @@ enum NtdllPatcher {
     static let step = "Patch ntdll"
 
     private static let magicPE32Plus: UInt16 = 0x20b
-    // SECTION_NAME, SECTION_SIZE and SECTION_FLAGS in resolve.py.
+    // SECTION_NAME, SECTION_SIZE and SECTION_FLAGS in resolve.py. The patched file is checked
+    // against patchedNtdll, so a value that drifts here makes patching fail.
     private static let sectionName: [UInt8] = Array(".npdet".utf8) + [0, 0]
     private static let sectionSize = 0x1000
     private static let sectionFlags: UInt32 = 0x6000_0020
@@ -55,7 +56,7 @@ enum NtdllPatcher {
             NtdllPatch(
                 arch: .x86_64Windows,
                 payloadResource: "detour2",
-                payloadSHA256: "4ce2ddc11c433fe15f78633fc5c1fda8b27fa642426cb26378f7d7d7b54a79f8",
+                payloadSHA256: "8504714bba0195439cb5b44c89f25c68dbb7f01bae6f72ca0a258a0daec3e244",
                 caveRVA: 0x80be0,
                 payloadRVA: 0x80be0,
                 hooks: [
@@ -84,8 +85,58 @@ enum NtdllPatcher {
                 imageBase: 0x7bc0_0000
             ),
         ],
+        "26.3.0.39832": [
+            NtdllPatch(
+                arch: .x86_64Windows,
+                payloadResource: "detour2-cx26",
+                payloadSHA256: "e35b834408599c45f30b23a6d2bf38acfa5c3df4d15206617c471e23a4a01bfb",
+                caveRVA: 0xae000,
+                payloadRVA: 0xae000,
+                hooks: [
+                    NtdllHook(rva: 0x44972,
+                              stolen: [0x48, 0x83, 0xbc, 0x24, 0xf0, 0x00, 0x00, 0x00, 0x00]),
+                ],
+                caveSize: 0x1000,
+                cavePad: 0x00,
+                machine: 0x8664,
+                magic: 0x20b,
+                imageBase: 0x1_7000_0000,
+                placement: .section
+            ),
+            NtdllPatch(
+                arch: .i386Windows,
+                payloadResource: "detour32-cx26",
+                payloadSHA256: "be465bc936cafafae4aa1b4c41f668e08848492d9858c2cf2ad483a9f1ab25e5",
+                caveRVA: 0xaa000,
+                payloadRVA: 0xaa000,
+                hooks: [
+                    NtdllHook(rva: 0x43b40, stolen: [0xf6, 0x45, 0xc0, 0x01, 0x75, 0x26]),
+                ],
+                caveSize: 0x1000,
+                cavePad: 0x00,
+                machine: 0x14c,
+                magic: 0x10b,
+                imageBase: 0x7bc0_0000,
+                placement: .section
+            ),
+        ],
         // FEX patches
         "27.0.0.40921-fex": [
+            NtdllPatch(
+                arch: .x86_64Windows,
+                payloadResource: "detour2-fex",
+                payloadSHA256: "6af3f36658907cc94c096e432006807d6997bd970560f2579df748d6fd6e2bc6",
+                caveRVA: 0x79394,
+                payloadRVA: 0x793a0,
+                hooks: [
+                    NtdllHook(rva: 0x34b2e, stolen: [0x48, 0x8b, 0x84, 0x24, 0x10, 0x01, 0x00, 0x00]),
+                ],
+                caveSize: 3180,
+                cavePad: 0xcc,
+                machine: 0x8664,
+                magic: 0x20b,
+                imageBase: 0x1_7000_0000
+            ),
             NtdllPatch(
                 arch: .i386Windows,
                 payloadResource: "detour32-fex",
@@ -104,7 +155,7 @@ enum NtdllPatcher {
             NtdllPatch(
                 arch: .aarch64Windows,
                 payloadResource: "detour64-fex",
-                payloadSHA256: "bee4ee13c235bd5de3cb6ce840b9695effd5623132f6dc0d137496d6a5330f5e",
+                payloadSHA256: "68a458ec9c32041c79fdd622d18e91cfbe825a5292cae362d310930e34dd598e",
                 caveRVA: 0xf1185,
                 payloadRVA: 0xf1190,
                 hooks: [
@@ -122,7 +173,7 @@ enum NtdllPatcher {
             NtdllPatch(
                 arch: .x86_64Windows,
                 payloadResource: "detour2-41069",
-                payloadSHA256: "67b70667387ff5bf89743b2d0a995a94543812678d4558dc884e6cebb46e7750",
+                payloadSHA256: "660ea7c935620e620a45a46e552c0a3de9292e031bf93ef676968154d45e78d5",
                 caveRVA: 0x815e0,
                 payloadRVA: 0x815e0,
                 hooks: [
@@ -153,6 +204,22 @@ enum NtdllPatcher {
         ],
         "27.0.0.41069-fex": [
             NtdllPatch(
+                arch: .x86_64Windows,
+                payloadResource: "detour2-fex-41069",
+                payloadSHA256: "0084bba1d7399e749d918dba4f313f1dc1825d2a487f3169b469b57c5b161ca5",
+                caveRVA: 0xb5000,
+                payloadRVA: 0xb5000,
+                hooks: [
+                    NtdllHook(rva: 0x34aae, stolen: [0x48, 0x8b, 0x84, 0x24, 0x10, 0x01, 0x00, 0x00]),
+                ],
+                caveSize: 0x1000,
+                cavePad: 0x00,
+                machine: 0x8664,
+                magic: 0x20b,
+                imageBase: 0x1_7000_0000,
+                placement: .section
+            ),
+            NtdllPatch(
                 arch: .i386Windows,
                 payloadResource: "detour32-fex-41069",
                 payloadSHA256: "6ff6c7289e639c4caad85c2670bfa849d9f36baa24152b6979896caede5e249b",
@@ -171,7 +238,7 @@ enum NtdllPatcher {
             NtdllPatch(
                 arch: .aarch64Windows,
                 payloadResource: "detour64-fex-41069",
-                payloadSHA256: "c6060b07f2c2f25636fcb1489ddd6729c277666167e9a090f55a1b711f0d5979",
+                payloadSHA256: "b27484eaed592366ddd3a5b3c565c2dc05e8fa255fbd7e19d9d8eb619ff57c23",
                 caveRVA: 0xf3185,
                 payloadRVA: 0xf3190,
                 hooks: [
@@ -339,7 +406,7 @@ enum NtdllPatcher {
         }
 
         let rawOffset = (bytes.count + fileAlignment - 1) & ~(fileAlignment - 1)
-        // The last zero is NumberOfRelocations and NumberOfLinenumbers (two bytes each).
+        // The last zero is NumberOfRelocations and NumberOfLinenumbers, two bytes each.
         var entry = sectionName
         for field in [UInt32(sectionSize), UInt32(patch.caveRVA), UInt32(sectionSize), UInt32(rawOffset),
                       0, 0, 0, sectionFlags] {
@@ -471,7 +538,7 @@ enum NtdllPatcher {
     // Resources
 
     static func payload(for patch: NtdllPatch) throws -> Data {
-        guard let url = AppResources.bundle.url(
+        guard let url = AppResources.url(
             forResource: patch.payloadResource, withExtension: "bin"
         ) else {
             throw StepFailure(
@@ -564,7 +631,7 @@ enum NtdllPatcher {
         var written: [WineArch] = []
 
         for patch in patches(for: build) {
-            let destination = bridge.appending(path: "wine/\(patch.arch.rawValue)/ntdll.dll")
+            let destination = stagedCopy(of: patch.arch, build: build.id, in: bridge)
 
             if Digest.sha256IfPresent(destination) == build.patchedNtdll[patch.arch] { continue }
 
@@ -573,22 +640,63 @@ enum NtdllPatcher {
             written.append(patch.arch)
         }
 
-        prune(keeping: patches(for: build).map(\.arch), in: bridge)
+        prune(keeping: patches(for: build).map(\.arch), build: build.id, in: bridge)
 
         return written
     }
 
-    private static func prune(keeping arches: [WineArch], in bridge: URL) {
-        let fm = FileManager.default
-
-        for arch in WineArch.allCases where !arches.contains(arch) {
-            let directory = bridge.appending(path: "wine/\(arch.rawValue)")
-            try? fm.removeItem(at: directory.appending(path: "ntdll.dll"))
-
-            let path = directory.path(percentEncoded: false)
-            if let left = try? fm.contentsOfDirectory(atPath: path), left.isEmpty {
-                try? fm.removeItem(at: directory)
+    static func stageInstalled(
+        builds: [RunnerBuild] = RunnerStore.installedBuilds(),
+        runners: URL = SupportPaths.runners,
+        bridge: URL = SupportPaths.bridge
+    ) -> [(build: String, error: any Error)] {
+        var failures: [(build: String, error: any Error)] = []
+        for build in builds {
+            do {
+                try stage(build: build, runnerRoot: SupportPaths.clonedRoot(forBuild: build.id, runners: runners),
+                          bridge: bridge)
+            } catch {
+                failures.append((build.id, error))
             }
+        }
+        return failures
+    }
+
+    static func stagedCopy(of arch: WineArch, build: String, in bridge: URL = SupportPaths.bridge) -> URL {
+        bridge.appending(path: "wine/\(build)/\(arch.rawValue)/ntdll.dll")
+    }
+
+    // Also clears the wine/<arch> copies 1.0/1.0.1 left behind.
+    static func pruneBuilds(
+        keeping builds: Set<String>, in bridge: URL = SupportPaths.bridge, keepingLegacy: Bool = false
+    ) {
+        let wine = bridge.appending(path: "wine")
+        let fm = FileManager.default
+        let legacy = keepingLegacy ? Set(WineArch.allCases.map(\.rawValue)) : []
+        let entries = (try? fm.contentsOfDirectory(at: wine, includingPropertiesForKeys: nil)) ?? []
+        for entry in entries
+        where !builds.contains(entry.lastPathComponent) && !legacy.contains(entry.lastPathComponent) {
+            try? fm.removeItem(at: entry)
+        }
+    }
+
+    private static func removeStagedCopy(of arch: WineArch, build: String, in bridge: URL) throws {
+        let fm = FileManager.default
+        let copy = stagedCopy(of: arch, build: build, in: bridge)
+
+        if fm.fileExists(atPath: copy.path(percentEncoded: false)) {
+            try fm.removeItem(at: copy)
+        }
+
+        let directory = copy.deletingLastPathComponent()
+        if let left = try? fm.contentsOfDirectory(atPath: directory.path(percentEncoded: false)), left.isEmpty {
+            try fm.removeItem(at: directory)
+        }
+    }
+
+    private static func prune(keeping arches: [WineArch], build: String, in bridge: URL) {
+        for arch in WineArch.allCases where !arches.contains(arch) {
+            try? removeStagedCopy(of: arch, build: build, in: bridge)
         }
     }
 

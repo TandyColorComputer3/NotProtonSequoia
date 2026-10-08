@@ -188,11 +188,12 @@ enum SteamRepair {
 
     static func clearInsert(at plist: URL) throws -> Bool {
         guard var dict = SteamBundle.readInfoPlist(at: plist),
-              var environment = dict[SteamBundle.environmentKey] as? [String: Any],
-              environment[SteamBundle.insertKey] != nil
+              var environment = dict[SteamBundle.environmentKey] as? [String: Any]
         else { return false }
 
-        environment.removeValue(forKey: SteamBundle.insertKey)
+        let removed = [SteamBundle.insertKey, SteamBundle.controllerBlockKey]
+            .compactMap { environment.removeValue(forKey: $0) }
+        guard !removed.isEmpty else { return false }
         dict[SteamBundle.environmentKey] = environment
         try SteamBundle.writeInfoPlist(dict, at: plist)
         return true

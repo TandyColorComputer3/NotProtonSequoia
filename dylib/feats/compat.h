@@ -12,9 +12,7 @@
 #define COMPAT_MANAGER_TOOL_COUNT_OFF  0x330
 #define COMPAT_TOOL_NAME_OFF           0x40
 
-// Sanity cap: the client ships one tool on macOS, so a count above this means
-// the offset moved and the array walk would read past the end.
-#define COMPAT_MANAGER_TOOLS_MAX       32
+#define COMPAT_MANAGER_TOOLS_HEADROOM  32
 
 // Platform bits GetValidPlatforms reports.
 #define COMPAT_PLATFORM_WINDOWS  0x1
@@ -53,6 +51,12 @@ size_t np_compat_tool_stride(void);
 // initial one exists (setenv can free the environ the client is reading).
 void np_compat_export_tools_path(void);
 
+// Reads the app's tool list into g_tools, skipping lines that do not parse. Returns the
+// number of tools kept.
+int  np_compat_load_tool_list(const char *path, const char *tools_dir);
+
+// Writes a directory for every tool in the app's list and removes the directories of tools
+// no longer in it.
 int  np_compat_ensure_tool_manifest(void);
 void np_compat_force_enable(void *compat_mgr);
 
@@ -99,7 +103,7 @@ void np_compat_map_tool(void *compat_mgr, uint32_t appid, const char *tool_name)
 // CCompatManager::YldRegisterTool, resolved at install time.
 void np_compat_set_register_fn(uintptr_t yld_register_tool);
 
-// Registers CrossOver into the given manager once. The local
+// Registers every tool in the app's list into the given manager once. The local
 // compatibilitytools.d scan uses a different instance than the dropdown reads
 // and does not run on every launch, so this registers into the right one.
 void np_compat_register_crossover(void *compat_mgr);
@@ -109,13 +113,23 @@ void np_compat_register_crossover(void *compat_mgr);
 // scan builds a different instance).
 void *np_compat_manager(void);
 
-// The registered CrossOver tool entry in the manager array, or NULL.
+// The first tool in the app's list the manager holds, or NULL.
 // Manager-owned. Callers read fields without taking ownership.
 void *np_compat_registered_tool(void *compat_mgr);
 
-// Absolute path to the local CrossOver tool directory, or NULL. Resolved once
-// and cached.
+// Name of the first tool in the app's list, which unmapped Windows games run under.
+const char *np_compat_fallback_tool_name(void);
+
+uint32_t np_compat_manager_tools_max(void);
+
+// Absolute path to the directory of the first tool in the app's list, or NULL.
 const char *np_compat_tool_dir(void);
+
+// True when the launch command runs a NotProton compatibility tool.
+int np_compat_runs_tool(const char *cmd);
+
+// True when the app is set to run with a NotProton compatibility tool.
+int np_compat_app_runs_tool(uint32_t appid);
 
 // Command line template for the tool's toolmanifest.vdf commandline value.
 const char *np_compat_tool_commandline(void);

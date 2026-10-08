@@ -253,7 +253,7 @@ void detour_build_module32(struct ctx *c, void *wm, void *fp)
     if (is_steamclient32)
     {
         *WM_FLAGS(wm)  |= LDR_DONT_RESOLVE_REFS;
-        *ARG_FLAGS(fp) |= LDR_DONT_RESOLVE_REFS;
+        *ARG_FLAGS(fp) |= FLAGS_BIT;
         restore_image_base(c, wm, sc);
     }
     else

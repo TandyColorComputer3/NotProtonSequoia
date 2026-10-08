@@ -6,6 +6,7 @@ struct PrefixesView: View {
 
     @Environment(PrefixesModel.self) private var model
     @Environment(\.colorSchemeContrast) private var contrast
+    @State private var sortOrder = [KeyPathComparator(\PrefixRow.lastUsed, order: .reverse)]
 
     var body: some View {
         Group {
@@ -68,20 +69,16 @@ struct PrefixesView: View {
             Text(PrefixPrompt.deleteMessage(deleting))
         }
         .confirmationDialog(
-            PrefixPrompt.rebuildTitle(rebuilding),
+            PrefixPrompt.rebuildTitle(rebuilding, for: rebuildTool),
             isPresented: asking(.rebuild),
             titleVisibility: .visible
         ) {
             Button(PrefixPrompt.rebuildWithBackupButton(rebuilding)) {
-                let targets = rebuilding
-                model.pendingConfirmation = nil
-                Task { await model.recreate(targets) }
+                model.confirmRebuild()
             }
             .keyboardShortcut(.defaultAction)
             Button(PrefixPrompt.rebuildWithoutBackupButton(rebuilding)) {
-                let targets = rebuilding
-                model.pendingConfirmation = nil
-                Task { await model.recreate(targets, keepBackup: false) }
+                model.confirmRebuild(keepBackup: false)
             }
             Button("Cancel", role: .cancel) { model.pendingConfirmation = nil }
         } message: {
@@ -114,8 +111,13 @@ struct PrefixesView: View {
     }
 
     private var rebuilding: [WinePrefix] {
-        if case .rebuild(let targets) = model.pendingConfirmation { return targets }
+        if case .rebuild(let targets, _) = model.pendingConfirmation { return targets }
         return []
+    }
+
+    private var rebuildTool: InstalledTool? {
+        if case .rebuild(_, let tool) = model.pendingConfirmation { return tool }
+        return nil
     }
 
     private var backingUp: [WinePrefix] {
@@ -126,7 +128,7 @@ struct PrefixesView: View {
     private func isAsking(_ question: Question) -> Bool {
         switch (question, model.pendingConfirmation) {
         case (.delete, .delete): true
-        case (.rebuild, .rebuild): true
+        case (.rebuild, .rebuild(_, _)): true
         case (.backUp, .backUp): true
         default: false
         }
@@ -172,6 +174,10 @@ struct PrefixesView: View {
         TextWidth.widest(model.prefixes.map(\.library.displayName)) ?? 120
     }
 
+    private var toolWidth: CGFloat {
+        TextWidth.widest(model.prefixes.compactMap(model.lastTool)) ?? 60
+    }
+
     private var lastUsedWidth: CGFloat {
         TextWidth.widest(model.prefixes.map(lastUsed)) ?? 110
     }
@@ -179,7 +185,7 @@ struct PrefixesView: View {
     private var gameWidth: CGFloat {
         let widths = model.prefixes.map { prefix -> CGFloat in
             var width = TextWidth.of(prefix.title)
-            if model.isForeign(prefix) { width += 22 }
+            if model.isStale(prefix) { width += 22 }
             if prefix.name == nil {
                 width += TextWidth.of("No longer installed", size: NSFont.smallSystemFontSize) + 6
             }
@@ -189,24 +195,50 @@ struct PrefixesView: View {
         return widest + TextWidth.cellPadding
     }
 
+    private struct PrefixRow: Identifiable {
+        let prefix: WinePrefix
+        let tool: String
+        let appID: Int
+        let size: Int64
+        let title: String
+        let library: String
+        let lastUsed: Date
+
+        var id: WinePrefix.ID { prefix.id }
+    }
+
+    private var rows: [PrefixRow] {
+        model.prefixes.map { prefix in
+            PrefixRow(
+                prefix: prefix,
+                tool: model.lastTool(prefix) ?? "",
+                appID: Int(prefix.appID) ?? 0,
+                size: model.usage[prefix.id]?.bytes ?? -1,
+                title: prefix.title,
+                library: prefix.library.displayName,
+                lastUsed: prefix.lastUsed ?? .distantPast
+            )
+        }
+        .sorted(using: sortOrder)
+    }
+
     private var table: some View {
         @Bindable var model = model
-        return Table(model.prefixes, selection: $model.selection) {
-            TableColumn("Game") { prefix in
+        return Table(rows, selection: $model.selection, sortOrder: $sortOrder) {
+            TableColumn("Game", value: \.title) { row in
+                let prefix = row.prefix
                 HStack(spacing: 6) {
-                    if model.isForeign(prefix) {
-                        Button {
-                            model.pendingConfirmation = .rebuild([prefix])
+                    if model.isStale(prefix) {
+                        Menu {
+                            rebuildChoices([prefix])
                         } label: {
                             Image(systemName: "exclamationmark.circle.fill")
                                 .foregroundStyle(.tint)
                         }
-                        .buttonStyle(.borderless)
-                        .disabled(model.isBusy)
-                        .help(
-                            "Built by a different compatibility tool, so the game cannot start. "
-                                + "Click to rebuild the prefix."
-                        )
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .disabled(model.isBusy || model.tools.isEmpty)
                         .accessibilityLabel("Needs rebuilding")
                     }
                     Text(prefix.title).help(prefix.title)
@@ -222,20 +254,31 @@ struct PrefixesView: View {
             }
             .width(min: 60, ideal: gameWidth)
 
-            TableColumn("App ID") { prefix in
-                Text(prefix.appID).monospacedDigit().foregroundStyle(.secondary)
+            TableColumn("Tool", value: \.tool) { row in
+                let prefix = row.prefix
+                if let tool = model.lastTool(prefix) {
+                    Text(tool).foregroundStyle(.secondary).help(tool)
+                } else {
+                    Text("None")
+                        .foregroundStyle(contrast == .increased ? .secondary : .tertiary)
+                }
+            }
+            .width(min: 60, ideal: toolWidth)
+
+            TableColumn("App ID", value: \.appID) { row in
+                Text(row.prefix.appID).monospacedDigit().foregroundStyle(.secondary)
             }
             .width(min: 50, ideal: 80)
 
-            TableColumn("Library") { prefix in
-                Text(prefix.library.displayName)
+            TableColumn("Library", value: \.library) { row in
+                Text(row.library)
                     .foregroundStyle(.secondary)
-                    .help(prefix.library.displayName)
+                    .help(row.library)
             }
             .width(min: 44, ideal: libraryWidth)
 
-            TableColumn("Size") { prefix in
-                if let usage = model.usage[prefix.id] {
+            TableColumn("Private Size", value: \.size) { row in
+                if let usage = model.usage[row.id] {
                     Text(usage.bytes.formatted(.byteCount(style: .file)))
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
@@ -246,13 +289,12 @@ struct PrefixesView: View {
             }
             .width(min: 56, ideal: 90)
 
-            TableColumn("Last used") { prefix in
-                Text(lastUsed(prefix))
+            TableColumn("Last used", value: \.lastUsed) { row in
+                Text(lastUsed(row.prefix))
                     .foregroundStyle(.secondary)
-                    .help(lastUsed(prefix))
+                    .help(lastUsed(row.prefix))
             }
             .width(min: 60, ideal: lastUsedWidth)
-
 
         }
         .contextMenu(forSelectionType: WinePrefix.ID.self) { ids in
@@ -280,8 +322,10 @@ struct PrefixesView: View {
                 Button(PrefixPrompt.backUpButton(targets)) {
                     model.pendingConfirmation = .backUp(targets)
                 }
-                Button(PrefixPrompt.rebuildButton(targets)) {
-                    model.pendingConfirmation = .rebuild(targets)
+                if model.tools.count > 1 {
+                    Menu(PrefixPrompt.rebuildButton(targets)) { rebuildChoices(targets) }
+                } else {
+                    rebuildChoices(targets, label: PrefixPrompt.rebuildButton(targets))
                 }
                 Button(PrefixPrompt.deleteButton(targets), role: .destructive) {
                     model.pendingConfirmation = .delete(targets)
@@ -289,6 +333,15 @@ struct PrefixesView: View {
             }
         }
         .disabled(model.isBusy)
+    }
+
+    @ViewBuilder
+    private func rebuildChoices(_ targets: [WinePrefix], label: String? = nil) -> some View {
+        ForEach(model.tools) { tool in
+            Button(label ?? tool.display) {
+                model.pendingConfirmation = .rebuild(targets, tool)
+            }
+        }
     }
 
     @ViewBuilder

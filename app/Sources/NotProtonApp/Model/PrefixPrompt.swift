@@ -32,11 +32,12 @@ enum PrefixPrompt {
         ])
     }
 
-    static func rebuildTitle(_ targets: [WinePrefix]) -> String {
+    static func rebuildTitle(_ targets: [WinePrefix], for tool: InstalledTool? = nil) -> String {
+        let with = tool.map { " with \($0.display)" } ?? ""
         switch targets.count {
-        case 0: "Rebuild prefix?"
-        case 1: "Rebuild the prefix for \(targets[0].title)?"
-        default: "Rebuild \(targets.count) prefixes?"
+        case 0: return "Rebuild prefix\(with)?"
+        case 1: return "Rebuild the prefix for \(targets[0].title)\(with)?"
+        default: return "Rebuild \(targets.count) prefixes\(with)?"
         }
     }
 

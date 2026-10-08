@@ -209,7 +209,6 @@ static np_patch_entry_t g_hooks[] = {
         .signature        = "steamui::ShortcutIconRender",
         .entry            = (void *)np_icon_render,
         .trampoline       = (void **)&g_render_orig,
-        .tolerate_missing = 1,
         .mode             = NP_PATCH_REPLACE,
     },
 };

@@ -79,6 +79,10 @@ set -- $("$here/../bridge/pe-info.py" "$out")
 # The shim statically links jsoncpp and weighs ~14 MB. Anything near zero means
 # the link dropped objects.
 [ "$size" -gt 1000000 ] || { echo "==> only $size bytes, the link dropped objects"; exit 1; }
+if grep -qa 'ole32\.dll' "$out"; then
+	echo "==> the shim imports ole32, so a helper run would show up in the Dock"
+	exit 1
+fi
 echo "==> built $out  $1  $size bytes  $2 (timestamp and checksum zeroed)"
 
 [ "$install" -eq 1 ] || { echo "==> not installing, pass --install to deploy"; exit 0; }

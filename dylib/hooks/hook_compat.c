@@ -190,35 +190,30 @@ static np_patch_entry_t g_hooks[] = {
         .signature = "CCompatManager::Init",
         .entry    = (void *)hook_CCompatManager_Init,
         .trampoline = &orig_CCompatManager_Init,
-        .tolerate_missing = 1,
     },
     {
         .label    = "CCompatManager::BIsCompatibilityToolEnabled",
         .signature = "CCompatManager::BIsCompatibilityToolEnabled",
         .entry    = (void *)hook_CCompatManager_BIsEnabled,
         .trampoline = &orig_CCompatManager_BIsEnabled,
-        .tolerate_missing = 1,
     },
     {
         .label    = "CCompatManager::FindToolForTargetApp",
         .signature = "CCompatManager::FindToolForTargetApp",
         .entry    = (void *)hook_FindToolForTargetApp,
         .trampoline = &orig_FindToolForTargetApp,
-        .tolerate_missing = 1,
     },
     {
         .label    = "CCompatManager::InternalSpecifyCompatTool",
         .signature = "CCompatManager::InternalSpecifyCompatTool",
         .entry    = (void *)hook_InternalSpecifyCompatTool,
         .trampoline = &orig_InternalSpecifyCompatTool,
-        .tolerate_missing = 1,
     },
     {
         .label    = "CCompatManager::GetOSListOverrideForApp.oslist_gate",
         .signature = "CCompatManager::GetOSListOverrideForApp.oslist_gate",
         .entry    = (void *)instrument_oslist_override_gate,
         .trampoline = NULL,
-        .tolerate_missing = 1,
         .mode     = NP_PATCH_PREHOOK,
     },
     {
@@ -226,7 +221,6 @@ static np_patch_entry_t g_hooks[] = {
         .signature = "CCompatManager::ResolveCompatToolForApp.local_redirect",
         .entry    = (void *)instrument_resolver_local_redirect,
         .trampoline = NULL,
-        .tolerate_missing = 1,
         .mode     = NP_PATCH_PREHOOK,
     },
     {
@@ -234,7 +228,6 @@ static np_patch_entry_t g_hooks[] = {
         .signature = "CAppManager::TerminateProcessByPid",
         .entry    = (void *)hook_TerminateProcessByPid,
         .trampoline = &orig_TerminateProcessByPid,
-        .tolerate_missing = 1,
     },
 };
 

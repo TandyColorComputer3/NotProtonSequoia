@@ -21,15 +21,11 @@ static void register_routes(void *address, void *ctx) {
     np_compatsvc_register(g_mh, g_slide, g_text_base, g_text_size);
 }
 
-// An unresolved site here leaves the CompatManager routes unregistered, and the panel
-// then shows a service that answers nothing, so the miss is worth a warning where the
-// optional hooks settle for a debug line.
 static np_patch_entry_t g_hooks[] = {
     {
         .label            = LOOKUP_LABEL,
         .entry            = (void *)register_routes,
         .trampoline       = NULL,
-        .tolerate_missing = 0,
         .mode             = NP_PATCH_PREHOOK,
     },
 };

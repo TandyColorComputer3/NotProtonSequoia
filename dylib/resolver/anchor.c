@@ -172,23 +172,17 @@ static uintptr_t uniqued_selector(const char *name) {
 }
 
 
-// Backward scan from a reference to the start of its function
-// Stops at the start of the section holding `pc` rather than the start of
-// __TEXT.
-static uintptr_t enclosing_fn(const struct mach_header_64 *mh, intptr_t slide,
-                              uintptr_t text, uintptr_t pc) {
-    uintptr_t floor = text;
-    uintptr_t sect_base;
-    size_t sect_size;
-    if (np_get_section_containing(mh, slide, pc, &sect_base, &sect_size) == 0)
-        floor = sect_base;
-
-    while (pc >= floor) {
-        if (is_entry_insn(pc)) return pc;
-        if (pc == floor) break;
-        pc -= 4;
-    }
-    return 0;
+static uintptr_t containing_fn(const struct mach_header_64 *mh, intptr_t slide,
+                              uintptr_t text, size_t text_sz, uintptr_t pc) {
+    uintptr_t code, start, end;
+    size_t code_sz;
+    if (np_find_section(mh, slide, "__TEXT", "__text", &code, &code_sz) != 0 ||
+        code < text || code - text > text_sz || code_sz > text_sz - (code - text))
+        return 0;
+    if (np_function_bounds(mh, slide, pc, &start, &end) != 0) return 0;
+    if (start < code || end > code + (code_sz & ~(size_t)3) || ((start | end) & 3))
+        return 0;
+    return start;
 }
 
 // Follow the single branch that targets `callee`
@@ -204,11 +198,11 @@ static uintptr_t sole_caller(const struct mach_header_64 *mh, intptr_t slide,
         if (t != callee) continue;
         // B also encodes intra-function jumps, so a loop back to a function's own
         // entry would otherwise make that function its own tail caller.
-        if (tail && enclosing_fn(mh, slide, text, pc) == callee) continue;
+        if (tail && containing_fn(mh, slide, text, text_sz, pc) == callee) continue;
         if (found) return 0;            // more than one caller
         found = pc;
     }
-    return found ? enclosing_fn(mh, slide, text, found) : 0;
+    return found ? containing_fn(mh, slide, text, text_sz, found) : 0;
 }
 
 
@@ -242,12 +236,6 @@ static uintptr_t scan_for_insn(uintptr_t text, size_t text_sz,
         }
     }
     return 0;
-}
-
-static int is_fn_start(const struct mach_header_64 *mh, intptr_t slide, uintptr_t fn) {
-    uintptr_t start, end;
-    if (np_function_bounds(mh, slide, fn, &start, &end) != 0) return 0;
-    return start == fn;
 }
 
 // The sole matching instruction pair inside one function body
@@ -320,6 +308,7 @@ static uintptr_t sole_insn_pair(const struct mach_header_64 *mh, intptr_t slide,
     }
     return found;
 }
+
 
 // The ObjC runtime may replace __objc_selrefs pointers with interned selectors.
 static const char *objc_stub_selector(uintptr_t stub, uintptr_t selrefs,
@@ -559,14 +548,14 @@ uintptr_t np_locate_anchor(const struct mach_header_64 *mh, intptr_t slide,
         fn = hop_to_caller(mh, slide, text_base, text_size, ref,
                            anchor->caller_hops, anchor->caller_tail);
         if (!fn) {
-            uintptr_t body = enclosing_fn(mh, slide, text_base, ref);
+            uintptr_t body = containing_fn(mh, slide, text_base, text_size, ref);
             if (body) fn = hop_to_caller(mh, slide, text_base, text_size, body,
                                          anchor->caller_hops, anchor->caller_tail);
         }
     } else {
-        fn = enclosing_fn(mh, slide, text_base, ref);
+        fn = containing_fn(mh, slide, text_base, text_size, ref);
     }
-    if (!fn || !is_fn_start(mh, slide, fn)) return 0;
+    if (!fn) return 0;
 
     if (anchor->kind == NP_MATCH_INSN_PAIR_IN_FN)
         return sole_insn_pair(mh, slide, fn, text_base, text_size, &anchor->pair);

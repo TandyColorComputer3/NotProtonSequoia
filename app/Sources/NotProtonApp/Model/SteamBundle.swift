@@ -15,6 +15,8 @@ enum SteamDeployment: Sendable, Equatable {
 enum SteamBundle {
 
     static let insertKey = "DYLD_INSERT_LIBRARIES"
+    static let controllerBlockKey = "SDL_JOYSTICK_BLACKLIST_DEVICES"
+    static let controllerBlockValue = "0x05ac/0x0004"
 
     static let plistBackupName = "Info.plist.before-notproton"
     static let environmentKey = "LSEnvironment"
@@ -46,6 +48,10 @@ enum SteamBundle {
 
         guard files.fileExists(atPath: deployedDylib) else { return .notInstalled }
 
+        guard currentControllerBlock(at: plist) == controllerBlockValue else {
+            return .outdated(deployed: deployedVersion(at: versionFile) ?? "", bundled: bundledVersion)
+        }
+
         guard let deployed = deployedVersion(at: versionFile) else { return .installed(version: nil) }
         if deployed == bundledVersion { return .installed(version: deployed) }
         return .outdated(deployed: deployed, bundled: bundledVersion)
@@ -56,6 +62,13 @@ enum SteamBundle {
               let environment = dict[environmentKey] as? [String: Any]
         else { return nil }
         return environment[insertKey] as? String
+    }
+
+    static func currentControllerBlock(at url: URL = SupportPaths.Steam.infoPlist) -> String? {
+        guard let dict = readInfoPlist(at: url),
+              let environment = dict[environmentKey] as? [String: Any]
+        else { return nil }
+        return environment[controllerBlockKey] as? String
     }
 
     static func deployedVersion(at url: URL = SupportPaths.deployedVersion) -> String? {

@@ -2,16 +2,43 @@
 # Development tool. The real patcher lives in the app (NtdllPatcher.swift).
 # This is the original Python version, kept for validating patches against
 # new CrossOver builds.
+import hashlib
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from resolve import PE, SECTION_FLAGS, SECTION_NAME, SECTION_SIZE, resolve, shell_vars  # noqa: E402
 
-DEFAULT_PAYLOAD = {0x8664: "detour2.bin", 0x14c: "detour32.bin", 0xaa64: "detour64-fex.bin"}
+# A new build needs its ntdll hash added here and in build-ntdll.sh.
+PAYLOAD_BY_CLEAN_SHA = {
+    "04c7200b6645decb7c2d1ba6b0195abc9af83257072558d11aa72cc067ac3377": "detour2.bin",
+    "94cc7c14c1e9dcf58ef501015c115f8405c73b2a65cefe31faa5d9e47f36e58b": "detour32.bin",
+    "f4fa556a3dc20f6e966a803f5de554359227a61a24cd5b5a2ad88a427ceeec58": "detour2-fex.bin",
+    "09474795d6f306163cebab6429819999fcff50e07dbc4b067a90ec4f74a3a7d7": "detour32-fex.bin",
+    "7823d71fbce6c9947163bf8b96beb299eabb02878245bcaf6759f2a22e81f071": "detour64-fex.bin",
+    "6dff64c00793ce92124f1316985c63783f539f26b392975c70f57637458d2387": "detour2-cx26.bin",
+    "2c60ee6b00dd13b7f6cb11017778a041ba6a321eaea194f1fa0dca7eab8403e2": "detour32-cx26.bin",
+    "5b388fd48823e905616432fba627eb48f68dc14383963bb213d55db3f691b1b9": "detour2-41069.bin",
+    "e7da2a712870222942ef27a80b3bf4fa70fc8545dd1a64bdc7f2fa24a38debc3": "detour32-41069.bin",
+    "1b02dcf6ad9d9490870f1127a421c4c0d1471c65ec1574e1e84c05d69801ac7e": "detour2-fex-41069.bin",
+    "66b1a244a611795c59a93a9491d17f36c98cd8db9be495004a37864e0e5ed4a5": "detour32-fex-41069.bin",
+    "77ca83b2e1a3a1242f9d2d8868328262b2bcfc3f59bacf8b9389ea7e797ea852": "detour64-fex-41069.bin",
+}
+
+KNOWN_MACHINES = (0x8664, 0x14c, 0xaa64)
+
+
+def default_payload(src):
+    with open(src, "rb") as f:
+        digest = hashlib.sha256(f.read()).hexdigest()
+    if digest in PAYLOAD_BY_CLEAN_SHA:
+        return PAYLOAD_BY_CLEAN_SHA[digest]
+    raise SystemExit(f"{src}: sha256 {digest} matches no known clean ntdll, "
+                     f"pass payload.bin as the third argument")
 
 
 def append_section(pe, d, r):
+    """Grows the image by one executable section and returns its file offset."""
     import struct
     raw = r['rawOffset']
     e = struct.unpack_from('<I', d, 0x3c)[0]
@@ -33,10 +60,10 @@ def main():
 
     r = resolve(src)
     v = shell_vars(src)
-    if r['machine'] not in DEFAULT_PAYLOAD:
+    if r['machine'] not in KNOWN_MACHINES:
         raise SystemExit(f"{src}: machine {r['machine']:#x} carries no detour")
     payload_path = sys.argv[3] if len(sys.argv) > 3 \
-        else os.path.join(here, DEFAULT_PAYLOAD[r['machine']])
+        else os.path.join(here, default_payload(src))
     detour = open(payload_path, "rb").read()
     payload_rva = int(v['NP_PAYLOAD_RVA'], 16)
     fill = r['fill']

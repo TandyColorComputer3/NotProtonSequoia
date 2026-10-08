@@ -5,19 +5,13 @@ import Testing
 
 // Scratch directories rather than the live runner, so these say the same thing on a
 // machine that has never had a clone made on it.
-private func scratchDirectory() throws -> URL {
-    let url = FileManager.default.temporaryDirectory
-        .appending(path: "notproton-setup-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-    return url
-}
 
 @Suite("Clean copy resolution")
 struct CleanTests {
 
     @Test("The backup beside a file is preferred when it exists")
     func backupWins() throws {
-        let dir = try scratchDirectory()
+        let dir = try scratchDirectory("setup")
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let live = dir.appending(path: "ntdll.dll")
@@ -30,7 +24,7 @@ struct CleanTests {
 
     @Test("A file with no backup resolves to itself")
     func noBackupResolvesToSelf() throws {
-        let dir = try scratchDirectory()
+        let dir = try scratchDirectory("setup")
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let live = dir.appending(path: "wine")
@@ -41,7 +35,7 @@ struct CleanTests {
 
     @Test("The suffix is appended, not substituted for the extension")
     func suffixIsAppended() throws {
-        let dir = try scratchDirectory()
+        let dir = try scratchDirectory("setup")
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let live = dir.appending(path: "ntdll.dll")
@@ -75,7 +69,7 @@ struct PatchInputTests {
     }
 
     private func makeRoot(live: Data, backup: Data?) throws -> URL {
-        let root = try scratchDirectory()
+        let root = try scratchDirectory("setup")
         let dir = root.appending(path: "lib/wine/x86_64-windows")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try live.write(to: dir.appending(path: "ntdll.dll"))
@@ -113,7 +107,7 @@ struct PatchInputTests {
 
     @Test("A missing ntdll is refused")
     func missingIsRefused() throws {
-        let root = try scratchDirectory()
+        let root = try scratchDirectory("setup")
         defer { try? FileManager.default.removeItem(at: root) }
 
         #expect(throws: StepFailure.self) {
@@ -127,7 +121,7 @@ struct ClonedPayloadTests {
 
     @Test("An intact clone is recognised by the payload inside it")
     func findsPayload() throws {
-        let runners = try scratchDirectory()
+        let runners = try scratchDirectory("setup")
         defer { try? FileManager.default.removeItem(at: runners) }
 
         let payload = SupportPaths.clonedRoot(forBuild: "1.2.3.4", runners: runners)
@@ -140,7 +134,7 @@ struct ClonedPayloadTests {
 
     @Test("A clone still shaped as an .app does not count as cloned")
     func refusesBundleShapedClone() throws {
-        let runners = try scratchDirectory()
+        let runners = try scratchDirectory("setup")
         defer { try? FileManager.default.removeItem(at: runners) }
 
         let clone = SupportPaths.runnerRoot(forBuild: "1.2.3.4", runners: runners)
@@ -154,7 +148,7 @@ struct ClonedPayloadTests {
 
     @Test("A clone with no payload in it does not count as cloned")
     func refusesCloneWithoutPayload() throws {
-        let runners = try scratchDirectory()
+        let runners = try scratchDirectory("setup")
         defer { try? FileManager.default.removeItem(at: runners) }
 
         let clone = SupportPaths.runnerRoot(forBuild: "1.2.3.4", runners: runners)

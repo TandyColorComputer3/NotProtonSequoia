@@ -7,6 +7,10 @@
 
 int np_webpatch_should_patch(const char *path);
 
+// Sets the default picker fallback for this thread. Names with characters outside
+// letters, digits, '_', '$', '.' and '-' are dropped.
+void np_webpatch_set_fallback_tool(const char *name);
+
 // The compat UIs, named so a caller can compare against the table rather than a literal
 // of its own that a rename would leave behind. forcetool calls SpecifyCompatTool straight
 // out; selecttool reads its list from the CompatManager routes.

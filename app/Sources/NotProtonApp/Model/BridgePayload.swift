@@ -84,35 +84,25 @@ enum BridgePayload {
         located: Located,
         bridge: URL = SupportPaths.bridge
     ) throws -> Outcome {
-        let files = FileManager.default
         var staged: [String] = []
         var unchanged: [String] = []
 
         for entry in located.sources {
-            let sourceSize = try fileSize(entry.source)
+            let sourceHash = try Digest.sha256(of: entry.source)
             for bridgePath in entry.bridgePaths {
                 let destination = bridge.appending(path: bridgePath)
-                if let existing = try? fileSize(destination), existing == sourceSize {
+                if Digest.sha256IfPresent(destination) == sourceHash {
                     unchanged.append(bridgePath)
                     continue
                 }
 
-                try files.createDirectory(
-                    at: destination.deletingLastPathComponent(), withIntermediateDirectories: true
-                )
-                try? files.removeItem(at: destination)
-                try files.copyItem(at: entry.source, to: destination)
+                try WriteRefused.catching(destination) {
+                    try atomicReplace(destination, from: entry.source, step: step)
+                }
                 staged.append(bridgePath)
             }
         }
 
         return Outcome(staged: staged, unchanged: unchanged)
-    }
-
-    private static func fileSize(_ url: URL) throws -> Int {
-        let attrs = try FileManager.default.attributesOfItem(
-            atPath: url.path(percentEncoded: false)
-        )
-        return (attrs[.size] as? Int) ?? 0
     }
 }

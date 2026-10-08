@@ -48,7 +48,6 @@ static np_patch_entry_t g_hooks[] = {
         .signature        = "steamui::ShortcutExtensionMatches",
         .entry            = (void *)np_ext_matches,
         .trampoline       = (void **)&g_ext_matches_orig,
-        .tolerate_missing = 0,
         .mode             = NP_PATCH_REPLACE,
     },
 };

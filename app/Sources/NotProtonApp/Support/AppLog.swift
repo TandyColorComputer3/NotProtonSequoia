@@ -29,6 +29,7 @@ enum AppLog {
             "state steam=\(describe(snapshot.steam))",
             "state steamRunning=\(snapshot.steamRunning) updatesBlocked=\(snapshot.updateBlocked)",
             "state runner=\(describe(snapshot.runner))",
+            "state installContent=\(snapshot.installContent)",
         ]
 
         if snapshot.crossOver.isEmpty {
@@ -75,11 +76,9 @@ enum AppLog {
     private static func describe(_ runner: RunnerState) -> String {
         switch runner {
         case .none: "not set up"
-        case .cloned(let build, let supported): "cloned \(build) supported=\(supported)"
-        case .bundleShaped(let build): "cloned \(build) in an .app"
-        case .unpatched(let build, let problems):
-            "cloned \(build) unpatched: \(problems.joined(separator: ", "))"
-        case .broken(let detail): "broken: \(detail)"
+        case .ready(let builds): "ready \(builds.joined(separator: ", "))"
+        case .unpatched(_, let problems):
+            "unpatched: \(problems.joined(separator: ", "))"
         }
     }
 

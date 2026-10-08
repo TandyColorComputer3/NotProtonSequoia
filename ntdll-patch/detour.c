@@ -31,7 +31,7 @@ struct export_dir  { u32 flags; u32 stamp; u16 maj; u16 min; u32 name;
                      u32 base; u32 nfuncs; u32 nnames;
                      u32 addr_funcs; u32 addr_names; u32 addr_ords; };
 
-#define LDR_DONT_CALL_DLLMAIN  0x20000000
+#define LDR_DONT_RESOLVE_REFS  0x00000002
 
 // WINE_MODREF, x86_64 layout.
 #define WM_DLLBASE(wm)   (*(void **)((u8 *)(wm) + 0x30))
@@ -97,12 +97,18 @@ static void write_jump(u8 *src, void *tgt)
     src[10] = 0xFF; src[11] = 0xE0;
 }
 
+// mov eax, 1 ; ret
+static void write_true_stub(u8 *src)
+{
+    src[0] = 0xB8; src[1] = 0x01; src[2] = 0x00; src[3] = 0x00; src[4] = 0x00;
+    src[5] = 0xC3;
+}
+
 // Rewrite every named export of sc64 that lsteamclient also exports so it jumps to the
 // lsteamclient one, plus the entry point.
 static void setup_trampolines(struct ctx *c, u8 *sc64, u8 *lsteam)
 {
     struct nt_headers *snt = (struct nt_headers *)(sc64 + ((struct dos_header *)sc64)->e_lfanew);
-    struct nt_headers *lnt = (struct nt_headers *)(lsteam + ((struct dos_header *)lsteam)->e_lfanew);
     struct export_dir *se;
     u32 *snames, *sfuncs, i;
     u16 *sords;
@@ -110,7 +116,7 @@ static void setup_trampolines(struct ctx *c, u8 *sc64, u8 *lsteam)
     u64 size = snt->opt.size_of_image;
     u32 oldp;
 
-    // make the whole sc64 image writable andexecutable so export stubs can be overwritten //
+    // make the whole sc64 image writable and executable so export stubs can be overwritten
     if (c->protect((void *)~0ull, &base, &size, 0x40 /*RWX*/, &oldp) != 0)
         return;
 
@@ -128,8 +134,10 @@ static void setup_trampolines(struct ctx *c, u8 *sc64, u8 *lsteam)
             write_jump(sc64 + sfuncs[sords[i]], tgt);
     }
 
-    if (snt->opt.entry_point && lnt->opt.entry_point)
-        write_jump(sc64 + snt->opt.entry_point, lsteam + lnt->opt.entry_point);
+    // Report success instead of forwarding. lsteamclient's DllMain has to run while
+    // Windows is loading lsteamclient, not while it is loading this stub.
+    if (snt->opt.entry_point)
+        write_true_stub(sc64 + snt->opt.entry_point);
 }
 
 // True when the MODREF basename (wm+0x60, a NUL-terminated wide string) is
@@ -170,5 +178,5 @@ void detour_build_module(struct ctx *c, void *wm, void *load_path)
 
     setup_trampolines(c, sc64, lsteam);
 
-    *WM_FLAGS(wm) |= LDR_DONT_CALL_DLLMAIN;
+    *WM_FLAGS(wm) |= LDR_DONT_RESOLVE_REFS;
 }

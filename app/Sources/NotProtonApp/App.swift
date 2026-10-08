@@ -21,6 +21,9 @@ struct NotProtonApp: App {
                 .environment(prefixes)
                 .frame(minWidth: 720, minHeight: 460)
                 .onChange(of: pane) { prefixes.forgetOutcome() }
+                .onChange(of: status.snapshot?.installedRunners.map(\.id)) {
+                    if prefixes.hasLoaded { Task { await prefixes.load() } }
+                }
         }
         .defaultSize(width: 900, height: 760)
         .commands { menus }
@@ -61,13 +64,13 @@ struct NotProtonApp: App {
         CommandMenu("Setup") {
             Button("Install") { Task { await status.requestInstall() } }
                 .keyboardShortcut("i", modifiers: .command)
-                .disabled(!status.isIdle)
+                .disabled(!status.canInstall)
 
             Button("Set Up Compatibility Tool") { Task { await status.requestCompatibilityTool() } }
-                .disabled(!status.isIdle || status.setupSource == nil)
+                .disabled(!status.canInstall || status.setupSource == nil)
 
             Button("Fetch Valve Binaries") { Task { await status.fetchValveBinaries() } }
-                .disabled(!status.isIdle)
+                .disabled(!status.canInstall)
 
             Divider()
 
@@ -120,12 +123,23 @@ struct NotProtonApp: App {
             }
             .disabled(selectionTargets.isEmpty)
 
-            Button(PrefixPrompt.rebuildButton(selectionTargets)) {
-                if !selectionTargets.isEmpty {
-                    prefixes.pendingConfirmation = .rebuild(selectionTargets)
+            if prefixes.tools.count > 1 {
+                Menu(PrefixPrompt.rebuildButton(selectionTargets)) {
+                    ForEach(prefixes.tools) { tool in
+                        Button(tool.display) {
+                            prefixes.pendingConfirmation = .rebuild(selectionTargets, tool)
+                        }
+                    }
                 }
+                .disabled(selectionTargets.isEmpty)
+            } else {
+                Button(PrefixPrompt.rebuildButton(selectionTargets)) {
+                    if let tool = prefixes.tools.first, !selectionTargets.isEmpty {
+                        prefixes.pendingConfirmation = .rebuild(selectionTargets, tool)
+                    }
+                }
+                .disabled(selectionTargets.isEmpty || prefixes.tools.isEmpty)
             }
-            .disabled(selectionTargets.isEmpty)
 
             Button(PrefixPrompt.deleteButton(selectionTargets)) {
                 if !selectionTargets.isEmpty {

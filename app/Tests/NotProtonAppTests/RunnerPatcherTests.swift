@@ -9,16 +9,10 @@ struct RunnerPatcherTests {
     // Only real CrossOver bytes can answer whether a repair works, since no tree a test builds
     // meets the pinned hashes. An APFS clone costs a second and leaves the real one alone.
     private static func healthyClone() throws -> (root: URL, build: RunnerBuild)? {
-        // Resolved first, or cp copies runners/current itself and its relative target
-        // lands as a dangling link in the scratch directory.
-        let live = SupportPaths.currentRunner.resolvingSymlinksInPath()
-
-        // Which build is installed decides the hashes the tree is held to. Taking the first in
-        // the allow list calls a healthy tree of the other flavor broken, skipping the rest.
-        guard let id = RunnerStore.buildIdentifier(inPath: live.path(percentEncoded: false)),
-              let build = SupportedRunners.build(id: id),
-              RunnerPatcher.verify(build: build, root: live).isEmpty
-        else { return nil }
+        guard let build = RunnerStore.installedBuilds().first(where: {
+            RunnerPatcher.verify(build: $0, root: SupportPaths.clonedRoot(forBuild: $0.id)).isEmpty
+        }) else { return nil }
+        let live = SupportPaths.clonedRoot(forBuild: build.id)
 
         let scratch = URL(filePath: NSTemporaryDirectory())
             .appending(path: "notproton-runner-\(UUID().uuidString)")
@@ -169,6 +163,8 @@ struct RunnerPatcherTests {
 
         try write("lib/wine/aarch64-unix/wine.app/Contents/MacOS/wine")
         #expect(RunnerPatcher.unixArch(in: root) == "aarch64-unix")
+
+        #expect(RunnerPatcher.unixArches(in: root) == ["aarch64-unix", "x86_64-unix"])
 
         let arches = RunnerPatcher.builtins(in: root).map(\.arch)
         #expect(

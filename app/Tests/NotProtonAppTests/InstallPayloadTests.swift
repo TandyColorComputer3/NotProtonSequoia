@@ -6,12 +6,6 @@ import Testing
 @Suite("Install payload")
 struct InstallPayloadTests {
 
-    private func scratch() throws -> URL {
-        let url = URL.temporaryDirectory.appending(path: "np-payload-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
-    }
-
     private func stage(_ root: URL, dylib: Bool = true, shim: Bool = true, iconmaker: Bool = true, appinfo: Bool = true, signatures: [String] = ["1788400362.json"]) throws {
         let files = FileManager.default
         let signatureDir = root.appending(path: "signatures/macos.arm64")
@@ -20,6 +14,8 @@ struct InstallPayloadTests {
         if shim { try Data("shim".utf8).write(to: root.appending(path: "overlay-shim.dylib")) }
         if iconmaker { try Data("iconmaker".utf8).write(to: root.appending(path: "iconmaker")) }
         if appinfo { try Data("appinfo".utf8).write(to: root.appending(path: "appinfo")) }
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: root.appending(path: "run"))
+        try Data("100\n".utf8).write(to: root.appending(path: "build-time"))
         for name in signatures {
             try Data("{}".utf8).write(to: signatureDir.appending(path: name))
         }
@@ -48,7 +44,7 @@ struct InstallPayloadTests {
 
     @Test("Every signature database in the payload is found, in a stable order")
     func findsAllSignatureDatabases() throws {
-        let root = try scratch()
+        let root = try scratchDirectory("payload")
         defer { try? FileManager.default.removeItem(at: root) }
         try stage(root, signatures: ["1788652215.json", "1788400362.json", "notes.txt"])
 
@@ -59,7 +55,7 @@ struct InstallPayloadTests {
 
     @Test("A payload missing an artifact says which one and how to fix it")
     func reportsMissingArtifacts() throws {
-        let root = try scratch()
+        let root = try scratchDirectory("payload")
         defer { try? FileManager.default.removeItem(at: root) }
         try stage(root, dylib: false)
 
@@ -75,7 +71,7 @@ struct InstallPayloadTests {
 
     @Test("A payload with no signature database is refused")
     func refusesPayloadWithoutSignatures() throws {
-        let root = try scratch()
+        let root = try scratchDirectory("payload")
         defer { try? FileManager.default.removeItem(at: root) }
         try stage(root, signatures: [])
 
@@ -89,7 +85,7 @@ struct InstallPayloadTests {
 
     @Test("An empty payload names every missing artifact")
     func reportsEverythingMissing() throws {
-        let root = try scratch()
+        let root = try scratchDirectory("payload")
         defer { try? FileManager.default.removeItem(at: root) }
         try stage(root, dylib: false, shim: false, iconmaker: false, appinfo: false, signatures: [])
 
@@ -103,5 +99,17 @@ struct InstallPayloadTests {
             #expect(failure.detail.contains("appinfo"))
             #expect(failure.detail.contains("signatures/macos.arm64"))
         }
+    }
+
+    @Test("A missing script or invalid build timestamp cannot be installed")
+    func refusesIncompleteBuildMetadata() throws {
+        let root = try scratchDirectory("payload-build")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try stage(root)
+        try Data("not a timestamp".utf8).write(to: root.appending(path: "build-time"))
+        #expect(throws: StepFailure.self) { try InstallPayload.locate(root: root) }
+        try Data("100".utf8).write(to: root.appending(path: "build-time"))
+        try FileManager.default.removeItem(at: root.appending(path: "run"))
+        #expect(throws: StepFailure.self) { try InstallPayload.locate(root: root) }
     }
 }

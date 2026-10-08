@@ -27,7 +27,7 @@ struct PayloadManifest: Sendable {
     static let resourceExtension = "manifest"
 
     static func bundled() throws -> PayloadManifest {
-        guard let url = AppResources.bundle.url(
+        guard let url = AppResources.url(
             forResource: resourceName, withExtension: resourceExtension
         ) else {
             throw StepFailure(

@@ -45,7 +45,7 @@ struct ValvePackageManifest: Sendable {
     private static let step = "Read the Valve file list"
 
     static func bundled() throws -> ValvePackageManifest {
-        guard let url = AppResources.bundle.url(
+        guard let url = AppResources.url(
             forResource: resourceName, withExtension: resourceExtension
         ) else {
             throw StepFailure(

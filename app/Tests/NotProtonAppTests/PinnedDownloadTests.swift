@@ -16,13 +16,6 @@ struct PinnedDownloadTests {
         var all: [String] { lock.lock(); defer { lock.unlock() }; return seen }
     }
 
-    private func scratch() throws -> URL {
-        let url = FileManager.default.temporaryDirectory
-            .appending(path: "notproton-pinned-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
-    }
-
     // A host directory holding one file under the name the download asks for.
     private func host(_ root: URL, named: String, serving bytes: String) throws -> URL {
         let dir = root.appending(path: "host-\(UUID().uuidString)")
@@ -41,7 +34,7 @@ struct PinnedDownloadTests {
 
     @Test("Bytes that match the pin are kept")
     func keepsMatchingBytes() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("pinned")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let body = "the real package"
@@ -57,7 +50,7 @@ struct PinnedDownloadTests {
 
     @Test("Bytes that do not match the pin are refused and nothing is left behind")
     func refusesMismatchedBytes() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("pinned")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let serving = try host(work, named: "package.tar", serving: "a substituted package")
@@ -80,7 +73,7 @@ struct PinnedDownloadTests {
 
     @Test("A host serving the wrong bytes is passed over for one that does not")
     func fallsThroughToAHonestHost() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("pinned")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let body = "the real package"
@@ -97,7 +90,7 @@ struct PinnedDownloadTests {
 
     @Test("An archive already on disk that matches is not fetched again")
     func reusesMatchingArchive() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("pinned")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let body = "the real package"
@@ -124,7 +117,7 @@ struct PinnedDownloadTests {
     // survive into the label: a fallthrough to a second host is only visible through it.
     @Test("A fetch reports the host the bytes came from")
     func reportsTheHostFetchedFrom() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("pinned")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let body = "the real package"

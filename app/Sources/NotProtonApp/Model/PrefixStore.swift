@@ -212,11 +212,56 @@ enum PrefixStore {
         return PrefixUsage(bytes: bytes, profileFiles: files)
     }
 
-    static func directoryBytes(_ url: URL) -> Int64 {
-        guard let out = try? Shell.check("/usr/bin/du", ["-sk", url.path(percentEncoded: false)]),
-            let kb = Int64(out.split(separator: "\t").first?.trimmingCharacters(in: .whitespaces) ?? "")
-        else { return 0 }
-        return kb * 1024
+    enum SizeMetric {
+        case privateSize, allocated
+    }
+
+    static func directoryBytes(_ url: URL, metric: SizeMetric = .privateSize) -> Int64 {
+        struct FileID: Hashable {
+            let device: dev_t
+            let inode: ino_t
+        }
+        var seen: Set<FileID> = []
+        var total: Int64 = 0
+        var root = url.path(percentEncoded: false)
+        while root.count > 1, root.hasSuffix("/") { root.removeLast() }
+        var paths = [root]
+        while let path = paths.popLast() {
+            var info = stat()
+            guard lstat(path, &info) == 0,
+                seen.insert(FileID(device: info.st_dev, inode: info.st_ino)).inserted
+            else { continue }
+            total += metric == .allocated ? Int64(info.st_blocks) * 512 : privateBytes(path)
+            guard info.st_mode & S_IFMT == S_IFDIR,
+                let children = try? FileManager.default.contentsOfDirectory(atPath: path)
+            else { continue }
+            paths += children.map { path + "/" + $0 }
+        }
+        return total
+    }
+
+    // st_blocks * 512 is the fallback when ATTR_CMNEXT_PRIVATESIZE is unavailable.
+    static func privateBytes(_ path: String) -> Int64 {
+        var info = stat()
+        guard lstat(path, &info) == 0 else { return 0 }
+        let allocated = Int64(info.st_blocks) * 512
+
+        var request = attrlist()
+        request.bitmapcount = u_short(ATTR_BIT_MAP_COUNT)
+        request.commonattr = attrgroup_t(ATTR_CMN_RETURNED_ATTRS)
+        request.forkattr = attrgroup_t(ATTR_CMNEXT_PRIVATESIZE)
+
+        // getattrlist fills in a header, then the private size.
+        var buffer = [UInt8](repeating: 0, count: 4 + MemoryLayout<attribute_set_t>.size + 8)
+        let options = UInt32(FSOPT_NOFOLLOW) | UInt32(FSOPT_ATTR_CMN_EXTENDED)
+        guard getattrlist(path, &request, &buffer, buffer.count, options) == 0 else { return allocated }
+
+        return buffer.withUnsafeBytes { raw in
+            let returned = raw.loadUnaligned(fromByteOffset: 4, as: attribute_set_t.self)
+            guard returned.forkattr & attrgroup_t(ATTR_CMNEXT_PRIVATESIZE) != 0 else { return allocated }
+            return raw.loadUnaligned(
+                fromByteOffset: 4 + MemoryLayout<attribute_set_t>.size, as: Int64.self)
+        }
     }
 
 
@@ -261,6 +306,17 @@ enum PrefixStore {
         _ prefix: WinePrefix, root: URL = serverRoot, lsof: String = "/usr/sbin/lsof",
         drainTimeout: DispatchTimeInterval = .seconds(2)
     ) -> Bool {
+        let lock = open(prefix.root.appending(path: ".notproton-prefix.lock").path(percentEncoded: false), O_RDWR | O_NOFOLLOW | O_CLOEXEC)
+        if lock >= 0 {
+            defer { close(lock) }
+            var info = stat()
+            guard fstat(lock, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+                flock(lock, LOCK_EX | LOCK_NB) == 0
+            else { return true }
+        } else if errno != ENOENT {
+            return true
+        }
+
         guard let dir = serverDirectory(of: prefix, root: root),
             FileManager.default.fileExists(atPath: dir.path(percentEncoded: false))
         else { return false }

@@ -66,9 +66,24 @@ private final class Recorder: @unchecked Sendable {
     }
 }
 
+private final class Asked: @unchecked Sendable {
+    private let lock = NSLock()
+    private var made: [String] = []
+
+    var calls: [String] { lock.withLock { made } }
+
+    func add(_ appID: String, _ build: String, _ keep: Bool) {
+        lock.withLock { made.append("\(appID) \(build) \(keep)") }
+    }
+}
+
 @MainActor
 @Suite("Loading prefixes")
 struct PrefixesModelTests {
+
+    nonisolated private static let tool = InstalledTool(
+        tool: SupportedRunners.all[0].tools[0], build: SupportedRunners.all[0].id
+    )
 
     private func makeLibrary(appIDs: [String]) throws -> (URL, SteamLibrary) {
         let dir = FileManager.default.temporaryDirectory.appending(path: "np-model-\(UUID().uuidString)")
@@ -87,40 +102,62 @@ struct PrefixesModelTests {
         try Data(text.utf8).write(to: url)
     }
 
-    // Enough of an ntdll for the arch to be read out of it: e_lfanew at 0x3c pointing at a
-    // PE signature and the machine word behind it.
-    private func writeNtdll(machine: UInt16, in pfx: URL) throws {
-        var bytes = [UInt8](repeating: 0, count: 0x40)
-        withUnsafeBytes(of: UInt32(0x40).littleEndian) { bytes.replaceSubrange(0x3c..<0x40, with: $0) }
-        bytes += [0x50, 0x45, 0x00, 0x00]
-        bytes += withUnsafeBytes(of: machine.littleEndian) { Array($0) }
-        let dll = pfx.appending(path: "drive_c/windows/system32/ntdll.dll")
-        try FileManager.default.createDirectory(
-            at: dll.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(bytes).write(to: dll)
-    }
-
-    // The launcher refuses a prefix from the other compatibility tool, so the pane has to mark
-    // those rows or the refusal is the first anyone hears. Never booted means no arch yet.
-    @Test("A prefix built by the other compatibility tool is the only one flagged")
-    func flagsForeignPrefixes() async throws {
+    @Test("Only a prefix recorded for a build that is no longer set up is stale")
+    func flagsStalePrefixes() async throws {
         let (dir, library) = try makeLibrary(appIDs: ["1574480", "253750", "447700"])
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let compatdata = library.compatdata
-        try writeNtdll(machine: 0xaa64, in: compatdata.appending(path: "1574480/pfx"))
-        try writeNtdll(machine: 0x8664, in: compatdata.appending(path: "253750/pfx"))
+        try "\(Self.tool.build)\n\(Self.tool.display)\n".write(
+            to: compatdata.appending(path: "1574480/\(PrefixTools.buildRecordName)"),
+            atomically: true, encoding: .utf8)
+        try "1.0.0.1\n".write(
+            to: compatdata.appending(path: "253750/\(PrefixTools.buildRecordName)"),
+            atomically: true, encoding: .utf8)
 
-        let model = PrefixesModel(libraries: { [library] }, runnerArch: { .arm64 })
+        let model = PrefixesModel(libraries: { [library] }, installedTools: { [Self.tool] })
         await model.load()
 
         func prefix(_ appID: String) throws -> WinePrefix {
             try #require(model.prefixes.first { $0.appID == appID })
         }
-        #expect(model.expectedArch == .arm64)
-        #expect(model.isForeign(try prefix("1574480")) == false)
-        #expect(model.isForeign(try prefix("253750")) == true)
-        #expect(model.isForeign(try prefix("447700")) == false)
+        #expect(model.isStale(try prefix("1574480")) == false)
+        #expect(model.lastTool(try prefix("1574480")) == Self.tool.display)
+        #expect(model.isStale(try prefix("253750")) == true)
+        #expect(model.isStale(try prefix("447700")) == false)
+        #expect(model.lastTool(try prefix("447700")) == nil)
+    }
+
+    @Test("The Prefixes table shows the short name of the tool that runs each prefix")
+    func showsShortToolName() async throws {
+        let (dir, library) = try makeLibrary(appIDs: ["1574480", "253750"])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let build = try #require(SupportedRunners.all.first { $0.tools.count == 2 })
+        let tools = build.tools.map { InstalledTool(tool: $0, build: build.id) }
+        let named = [
+            ("1574480", "CrossOver Preview - ARM64 Build (FEX)", UInt16(0xAA64)),
+            ("253750", "CrossOver Preview - ARM64 Build (Rosetta)", UInt16(0x8664)),
+        ]
+        for (appID, old, machine) in named {
+            let root = library.compatdata.appending(path: appID)
+            try write("\(build.id)\n\(old)\n", to: root.appending(path: PrefixTools.buildRecordName))
+            var bytes = [UInt8](repeating: 0, count: 0x40)
+            bytes[0x3c] = 0x40
+            bytes += [0x50, 0x45, 0x00, 0x00, UInt8(machine & 0xff), UInt8(machine >> 8)]
+            try FileManager.default.createDirectory(
+                at: root.appending(path: "pfx/drive_c/windows/system32"), withIntermediateDirectories: true)
+            try Data(bytes).write(to: root.appending(path: "pfx/drive_c/windows/system32/ntdll.dll"))
+        }
+
+        let model = PrefixesModel(libraries: { [library] }, installedTools: { tools })
+        await model.load()
+
+        func shown(_ appID: String) throws -> String? {
+            model.lastTool(try #require(model.prefixes.first { $0.appID == appID }))
+        }
+        #expect(try shown("1574480") == "CrossOver 2026 08 21-ARM64 - FEX")
+        #expect(try shown("253750") == "CrossOver 2026 08 21-ARM64 - Rosetta")
     }
 
     @Test("A load lists the prefixes and measures each one")
@@ -234,7 +271,33 @@ struct PrefixesModelTests {
         #expect(model.selectedPrefix == nil)
     }
 
-    // Selecting every prefix that needs rebuilding used to offer nothing, so they had to be
+    @Test("Confirming the rebuild dialog runs it with the tool and backup choice it asked about")
+    func confirmingRunsTheRebuild() async throws {
+        let (dir, library) = try makeLibrary(appIDs: ["1574480"])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let asked = Asked()
+        let model = PrefixesModel(
+            libraries: { [library] },
+            rebuild: { prefix, tool, keep in
+                asked.add(prefix.appID, tool.build, keep)
+                return nil
+            })
+        await model.load()
+
+        #expect(model.confirmRebuild() == nil)
+
+        model.pendingConfirmation = .rebuild(model.prefixes, Self.tool)
+        await model.confirmRebuild(keepBackup: false)?.value
+        #expect(model.pendingConfirmation == nil)
+
+        model.pendingConfirmation = .rebuild(model.prefixes, Self.tool)
+        await model.confirmRebuild()?.value
+
+        let build = Self.tool.build
+        #expect(asked.calls == ["1574480 \(build) false", "1574480 \(build) true"])
+    }
+
     @Test("Declining the backup tells the rebuild not to keep one")
     func rebuildForwardsTheBackupChoice() async throws {
         let (dir, library) = try makeLibrary(appIDs: ["1574480"])
@@ -242,15 +305,15 @@ struct PrefixesModelTests {
 
         let model = PrefixesModel(
             libraries: { [library] },
-            rebuild: { prefix, keep in keep ? Recorder.backup(of: prefix) : nil })
+            rebuild: { prefix, _, keep in keep ? Recorder.backup(of: prefix) : nil })
         await model.load()
         let targets = model.prefixes
         let title = try #require(targets.first).title
 
-        await model.recreate(targets, keepBackup: false)
+        await model.recreate(targets, as: Self.tool, keepBackup: false)
         #expect(model.outcome == "Rebuilt the prefix for \(title).")
 
-        await model.recreate(targets)
+        await model.recreate(targets, as: Self.tool)
         #expect(model.outcome?.contains("The original is at") == true)
     }
 
@@ -273,6 +336,7 @@ struct PrefixesModelTests {
         #expect(model.outcome == "Backed up 2 prefixes.")
     }
 
+    // Selecting every prefix that needs rebuilding used to offer nothing, so they had to be
     // picked and confirmed one at a time.
     @Test("Rebuilding takes every selected prefix, one after another")
     func rebuildTakesTheWholeSelection() async throws {
@@ -283,13 +347,13 @@ struct PrefixesModelTests {
         // runner while the first is still going is the failure this queue exists to avoid.
         let log = Recorder()
         let model = PrefixesModel(
-            libraries: { [library] }, rebuild: { prefix, _ in try log.enter(prefix) })
+            libraries: { [library] }, rebuild: { prefix, _, _ in try log.enter(prefix) })
         await model.load()
         model.selection = Set(model.prefixes.map(\.id))
 
         let targets = model.selectedPrefixes
         #expect(targets.count == 3)
-        await model.recreate(targets)
+        await model.recreate(targets, as: Self.tool)
 
         #expect(log.visited == targets.map(\.title))
         #expect(!log.overlapped)
@@ -310,11 +374,11 @@ struct PrefixesModelTests {
         let log = Recorder()
         let model = PrefixesModel(
             libraries: { [library] },
-            rebuild: { prefix, _ in try log.enter(prefix, failing: prefix.appID == "1649240") }
+            rebuild: { prefix, _, _ in try log.enter(prefix, failing: prefix.appID == "1649240") }
         )
         await model.load()
         let targets = model.prefixes
-        await model.recreate(targets)
+        await model.recreate(targets, as: Self.tool)
 
         #expect(log.visited.count == 3)
         #expect(model.outcome == "Rebuilt 2 prefixes. Each original is kept beside the game's "
@@ -333,12 +397,12 @@ struct PrefixesModelTests {
 
         let model = PrefixesModel(
             libraries: { [library] },
-            rebuild: { prefix, _ in
+            rebuild: { prefix, _, _ in
                 throw WriteRefused(path: prefix.root.path(percentEncoded: false))
             }
         )
         await model.load()
-        await model.recreate(model.prefixes)
+        await model.recreate(model.prefixes, as: Self.tool)
 
         let report = try #require(model.report)
         #expect(report.remedy == .ownership, "a prefix the user owns was blamed on a permission")
@@ -356,11 +420,11 @@ struct PrefixesModelTests {
 
         let log = Recorder()
         let model = PrefixesModel(
-            libraries: { [library] }, rebuild: { prefix, _ in try log.enter(prefix) })
+            libraries: { [library] }, rebuild: { prefix, _, _ in try log.enter(prefix) })
         await model.load()
         let target = try #require(model.prefixes.first)
 
-        await model.recreate([target])
+        await model.recreate([target], as: Self.tool)
 
         let backup = Recorder.backup(of: target).path(percentEncoded: false)
         #expect(model.outcome == "Rebuilt the prefix for \(target.title). The original is at "
@@ -374,11 +438,11 @@ struct PrefixesModelTests {
         let (dir, library) = try makeLibrary(appIDs: ["1574480"])
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        let model = PrefixesModel(libraries: { [library] }, rebuild: { _, _ in nil })
+        let model = PrefixesModel(libraries: { [library] }, rebuild: { _, _, _ in nil })
         await model.load()
         let target = try #require(model.prefixes.first)
 
-        await model.recreate([target])
+        await model.recreate([target], as: Self.tool)
 
         #expect(model.outcome == "Rebuilt the prefix for \(target.title).")
     }
@@ -485,9 +549,9 @@ struct PrefixesModelTests {
     func rebuildOfAnEmptySelectionDoesNothing() async throws {
         let log = Recorder()
         let model = PrefixesModel(
-            libraries: { [] }, rebuild: { prefix, _ in try log.enter(prefix) })
+            libraries: { [] }, rebuild: { prefix, _, _ in try log.enter(prefix) })
         model.outcome = "untouched"
-        await model.recreate([])
+        await model.recreate([], as: Self.tool)
 
         #expect(log.visited.isEmpty)
         #expect(model.outcome == "untouched")
@@ -502,11 +566,11 @@ struct PrefixesModelTests {
 
         let log = Recorder(holdingEachTurn: true)
         let model = PrefixesModel(
-            libraries: { [library] }, rebuild: { prefix, _ in try log.enter(prefix) })
+            libraries: { [library] }, rebuild: { prefix, _, _ in try log.enter(prefix) })
         await model.load()
         let targets = model.prefixes
 
-        let running = Task { await model.recreate(targets) }
+        let running = Task { await model.recreate(targets, as: Self.tool) }
 
         // A prefix having started means the one before it is done and out of the set. The turn is
         // held inside the rebuild, so the set cannot move between the wait and the read.
@@ -530,7 +594,7 @@ struct PrefixesModelTests {
         let box = Libraries([library])
         let log = Recorder()
         let model = PrefixesModel(
-            libraries: { box.current }, rebuild: { prefix, _ in try log.enter(prefix) })
+            libraries: { box.current }, rebuild: { prefix, _, _ in try log.enter(prefix) })
         await model.load()
         let targets = model.prefixes
         #expect(targets.count == 2)
@@ -538,7 +602,7 @@ struct PrefixesModelTests {
         // Taken away before the run finishes, so an empty list afterwards can only mean the
         // run went back to the libraries for it.
         box.current = []
-        await model.recreate(targets)
+        await model.recreate(targets, as: Self.tool)
 
         #expect(model.prefixes.isEmpty)
     }

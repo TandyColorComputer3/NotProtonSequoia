@@ -6,7 +6,24 @@ extension PrefixTools {
     @discardableResult
     static func recreate(
         _ prefix: WinePrefix,
-        runner: URL = SupportPaths.currentRunner,
+        as tool: InstalledTool,
+        runners: URL = SupportPaths.runners,
+        now: Date = .now,
+        keepBackup: Bool = true
+    ) throws -> URL? {
+        let kept = try recreate(
+            prefix, runner: SupportPaths.clonedRoot(forBuild: tool.build, runners: runners),
+            flavor: tool.tool.flavor, now: now, keepBackup: keepBackup
+        )
+        try writeBuildRecord(tool, for: prefix)
+        return kept
+    }
+
+    @discardableResult
+    static func recreate(
+        _ prefix: WinePrefix,
+        runner: URL,
+        flavor: CompatTool.Flavor = .fex,
         now: Date = .now,
         keepBackup: Bool = true
     ) throws -> URL? {
@@ -29,7 +46,7 @@ extension PrefixTools {
             )
         }
 
-        let loader = loader(runner: runner)
+        let loader = loader(runner: runner, flavor: flavor)
         guard FileManager.default.isExecutableFile(atPath: loader.path(percentEncoded: false)) else {
             throw StepFailure(
                 step: "Recreate prefix",
@@ -46,7 +63,7 @@ extension PrefixTools {
         defer { try? fm.removeItem(at: fresh) }
         try fm.createDirectory(at: fresh, withIntermediateDirectories: true)
 
-        var environment = environment(prefix: prefix, runner: runner)
+        var environment = environment(prefix: prefix, runner: runner, flavor: flavor)
         environment["WINEPREFIX"] = fresh.path(percentEncoded: false)
         layOutProfile(in: fresh)
         _ = try Shell.check(loader.path(percentEncoded: false), ["wineboot", "--init"], environment: environment)

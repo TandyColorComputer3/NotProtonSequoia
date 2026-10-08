@@ -101,6 +101,14 @@ jobs:
           make -s spawn-env
           make -s compatcheck
           make -s compatsvc-check
+          make -s launch-shell
+          make -s envcheck
+          make -s buildcheck
+          make -s settingscheck
+          make -s routecheck
+          make -s bridgecheck
+          make -s gamedrivecheck
+          make -s seedcheck
 
       - name: Run the Swift tests
         run: make -s app-tests

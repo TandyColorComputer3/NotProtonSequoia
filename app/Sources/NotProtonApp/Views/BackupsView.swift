@@ -66,7 +66,7 @@ struct BackupsView: View {
         guard !model.backups.isEmpty else { return "" }
         let size = model.backupBytes.formatted(.byteCount(style: .file))
         let count = model.backups.count == 1 ? "1 backup" : "\(model.backups.count) backups"
-        return "\(count), \(size)"
+        return "\(count), \(size) private size"
     }
 
     private var selected: [PrefixBackup] {
@@ -150,7 +150,7 @@ struct BackupsView: View {
             }
             .width(min: 44, ideal: libraryWidth)
 
-            TableColumn("Size") { backup in
+            TableColumn("Private Size") { backup in
                 Text(backup.bytes.formatted(.byteCount(style: .file)))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)

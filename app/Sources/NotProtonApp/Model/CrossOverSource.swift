@@ -35,14 +35,38 @@ enum CrossOverSource {
         SupportPaths.home.appending(path: "Applications", directoryHint: .isDirectory),
     ]
 
-    private static let manualKey = "manualCrossOverPath"
+    private static let manualKey = "manualCrossOverPaths"
+    // 1.0/1.0.1 kept a single chosen copy under this key.
+    private static let legacyManualKey = "manualCrossOverPath"
 
-    static var manualBundle: URL? {
-        get {
-            guard let path = UserDefaults.standard.string(forKey: manualKey), !path.isEmpty else { return nil }
-            return URL(filePath: path, directoryHint: .isDirectory)
-        }
-        set { UserDefaults.standard.set(newValue?.path(percentEncoded: false), forKey: manualKey) }
+    static func manualBundles(_ defaults: UserDefaults = .standard) -> [URL] {
+        let paths = defaults.stringArray(forKey: manualKey)
+            ?? defaults.string(forKey: legacyManualKey).map { [$0] } ?? []
+        return paths.filter { !$0.isEmpty }.map { URL(filePath: $0, directoryHint: .isDirectory) }
+    }
+
+    static func setManualBundles(_ bundles: [URL], _ defaults: UserDefaults = .standard) {
+        defaults.set(bundles.map { $0.path(percentEncoded: false) }, forKey: manualKey)
+        defaults.removeObject(forKey: legacyManualKey)
+    }
+
+    static func addManualBundle(_ bundle: URL, _ defaults: UserDefaults = .standard) {
+        let current = manualBundles(defaults)
+        guard !current.contains(where: { same($0, bundle) }) else { return }
+        setManualBundles(current + [bundle], defaults)
+    }
+
+    static func removeManualBundle(_ bundle: URL, _ defaults: UserDefaults = .standard) {
+        setManualBundles(manualBundles(defaults).filter { !same($0, bundle) }, defaults)
+    }
+
+    static func isSearched(_ bundle: URL) -> Bool {
+        let parent = bundle.standardizedFileURL.deletingLastPathComponent()
+        return searchRoots.contains { same($0, parent) }
+    }
+
+    static func same(_ a: URL, _ b: URL) -> Bool {
+        a.standardizedFileURL.path(percentEncoded: false) == b.standardizedFileURL.path(percentEncoded: false)
     }
 
     // A CrossOver bundle without this directory is bad!
@@ -65,7 +89,7 @@ enum CrossOverSource {
             found.append(inspect(bundle: bundle, isManual: isManual))
         }
 
-        if let manual = manualBundle { consider(manual, isManual: true) }
+        for manual in manualBundles() where !isSearched(manual) { consider(manual, isManual: true) }
 
         for root in searchRoots {
             let entries = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []

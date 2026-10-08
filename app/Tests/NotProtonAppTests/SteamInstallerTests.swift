@@ -8,12 +8,6 @@ import Testing
 @Suite("Steam installer", .serialized)
 struct SteamInstallerTests {
 
-    private func scratch() throws -> URL {
-        let url = URL.temporaryDirectory.appending(path: "np-install-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
-    }
-
     private func stockBundle(into work: URL) async throws -> URL {
         let manifest = try ValvePackageManifest.bundled()
         let bundle = try #require(manifest.bundle)
@@ -48,6 +42,8 @@ struct SteamInstallerTests {
 
         let appinfo = root.appending(path: "appinfo")
         try FileManager.default.copyItem(at: dylib, to: appinfo)
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: root.appending(path: "run"))
+        try Data("100\n".utf8).write(to: root.appending(path: "build-time"))
 
         try Data("{}".utf8).write(to: signatureDir.appending(path: "1788400362.json"))
         try Data("{}".utf8).write(to: signatureDir.appending(path: "1788652215.json"))
@@ -87,15 +83,21 @@ struct SteamInstallerTests {
         private var registered: [URL] = []
         func register(_ url: URL) { lock.lock(); registered.append(url); lock.unlock() }
         var registrations: [URL] { lock.lock(); defer { lock.unlock() }; return registered }
+        private var resets = 0
+        func resetInputAccess() { lock.lock(); resets += 1; lock.unlock() }
+        var inputAccessResets: Int { lock.lock(); defer { lock.unlock() }; return resets }
     }
 
     private func install(
         _ fixture: Fixture,
         version: String = "9.9.9-test",
         calls: Calls = Calls(),
-        stopped: Bool = false
+        stopped: Bool = false,
+        running: Bool = false,
+        recordBuild: Bool = true,
+        verifyRunner: (RunnerBuild, URL) throws -> Void = { _, _ in }
     ) throws -> InstallOutcome {
-        try SteamInstaller.run(
+        let outcome = try SteamInstaller.run(
             payload: fixture.payload,
             version: version,
             app: fixture.app,
@@ -106,14 +108,23 @@ struct SteamInstallerTests {
             appinfo: fixture.appinfo,
             deployedVersion: fixture.deployedVersion,
             backups: fixture.backups,
+            compatTools: fixture.work.appending(path: "compatibilitytools.d"),
+            runnerIsRunning: { _ in running },
+            verifyRunner: verifyRunner,
+            patchRunner: { _, _, _ in },
             stopClient: { _, onStopping in if stopped { onStopping() }; return stopped },
-            register: { calls.register($0) }
+            register: { calls.register($0) },
+            resetInputAccess: { calls.resetInputAccess() }
         )
+        if recordBuild {
+            try SteamInstaller.finish(outcome, deployedVersion: fixture.deployedVersion, isCurrent: { _ in true })
+        }
+        return outcome
     }
 
     @Test("A full install puts every artifact in place and declares the insert")
     func installsEverything() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         let fixture = try await self.fixture(into: work)
         let calls = Calls()
@@ -124,6 +135,7 @@ struct SteamInstallerTests {
         #expect(outcome.signatureDatabases == 2)
         #expect(outcome.backedUpPlist)
         #expect(!outcome.stoppedClient)
+        #expect(calls.inputAccessResets == 1)
 
         let files = FileManager.default
         #expect(files.fileExists(atPath: fixture.deployedDylib.path(percentEncoded: false)))
@@ -149,7 +161,7 @@ struct SteamInstallerTests {
 
     @Test("Setting the insert keeps the rest of Valve's environment")
     func preservesValveEnvironment() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         let fixture = try await self.fixture(into: work)
 
@@ -163,13 +175,14 @@ struct SteamInstallerTests {
         let after = try #require(SteamBundle.readInfoPlist(at: fixture.plist))
         let environment = try #require(after[SteamBundle.environmentKey] as? [String: Any])
         #expect(environment["LC_ALL"] as? String == "en_US.UTF-8", "LC_ALL is Valve's and has to survive")
-        #expect(environment.count == 2, "only the insert should have been added")
+        #expect(environment[SteamBundle.controllerBlockKey] as? String == SteamBundle.controllerBlockValue)
+        #expect(environment.count == 3, "only the insert and the controller block should have been added")
         #expect(after["CFBundleVersion"] as? String == "6.1", "the rest of the plist was disturbed")
     }
 
     @Test("The bundle is signed inner to outer, so every seal verifies afterwards")
     func signsInnerToOuter() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         let fixture = try await self.fixture(into: work)
 
@@ -190,7 +203,7 @@ struct SteamInstallerTests {
 
     @Test("An insert belonging to something else stops the install and is left alone")
     func refusesForeignInsert() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         let fixture = try await self.fixture(into: work)
 
@@ -213,7 +226,7 @@ struct SteamInstallerTests {
 
     @Test("Installing over an existing install is allowed and refreshes it")
     func reinstallIsAllowed() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         let fixture = try await self.fixture(into: work)
 
@@ -232,7 +245,7 @@ struct SteamInstallerTests {
 
     @Test("A failure while signing puts the plist back, so the bundle still starts")
     func revertsInsertWhenSigningFails() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         let fixture = try await self.fixture(into: work)
 
@@ -255,11 +268,13 @@ struct SteamInstallerTests {
             "the plist kept the insert, so the executable no longer matches its signature"
         )
         #expect(SteamBundle.currentInsert(at: fixture.plist) == nil)
+        #expect(!FileManager.default.fileExists(atPath: DeploymentContent.record(beside: fixture.deployedVersion).path))
+        #expect(!FileManager.default.fileExists(atPath: fixture.deployedVersion.path))
     }
 
     @Test("The plist backup records the state before the first install only")
     func backsUpOriginalPlistOnce() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         let fixture = try await self.fixture(into: work)
 
@@ -274,7 +289,7 @@ struct SteamInstallerTests {
 
     @Test("A missing Steam bundle is reported as its own condition")
     func reportsMissingBundle() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         var fixture = try await self.fixture(into: work)
         fixture = Fixture(
@@ -294,7 +309,7 @@ struct SteamInstallerTests {
 
     // Straight at the probe, so neither of these needs a Valve bundle to be fetched first.
     private func bundle(writable: Bool) throws -> URL {
-        let app = try scratch().appending(path: "Steam.app")
+        let app = try scratchDirectory("install").appending(path: "Steam.app")
         try FileManager.default.createDirectory(
             at: app.appending(path: "Contents/MacOS"), withIntermediateDirectories: true
         )
@@ -327,7 +342,7 @@ struct SteamInstallerTests {
     // the user to grant a permission that had nothing to do with it.
     @Test("A probe that fails for another reason keeps that reason")
     func probeFailureKeepsItsOwnReason() throws {
-        let app = try scratch().appending(path: "Steam.app")
+        let app = try scratchDirectory("install").appending(path: "Steam.app")
         defer { try? FileManager.default.removeItem(at: app.deletingLastPathComponent()) }
 
         let failure = try #require(throws: StepFailure.self) {
@@ -356,7 +371,7 @@ struct SteamInstallerTests {
 
     @Test("A second account installs its own components without touching a patched Steam")
     func secondAccountLeavesTheBundleAlone() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         let fixture = try await self.fixture(into: work)
         let files = FileManager.default
@@ -370,9 +385,11 @@ struct SteamInstallerTests {
         )
         try files.removeItem(at: fixture.support)
 
-        let outcome = try install(fixture, stopped: true)
+        let calls = Calls()
+        let outcome = try install(fixture, calls: calls, stopped: true)
 
         #expect(!outcome.stoppedClient, "Steam was stopped for an install that changed nothing")
+        #expect(calls.inputAccessResets == 0)
         #expect(!outcome.backedUpPlist)
         #expect(outcome.signatureDatabases == 2)
 
@@ -396,7 +413,7 @@ struct SteamInstallerTests {
 
     @Test("A Steam carrying a different build of the dylib is patched again")
     func differentBuildIsPatched() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         let fixture = try await self.fixture(into: work)
 
@@ -424,7 +441,7 @@ struct SteamInstallerTests {
 
     @Test("A payload with nothing in it stops the install before anything is touched")
     func refusesEmptyPayload() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         let fixture = try await self.fixture(into: work)
 
@@ -433,5 +450,176 @@ struct SteamInstallerTests {
 
         #expect(throws: StepFailure.self) { try InstallPayload.locate(root: empty) }
         #expect(SteamBundle.currentInsert(at: fixture.plist) == nil)
+    }
+
+    @Test("The installer records the package build time rather than the installation time")
+    func recordsPackageBuild() async throws {
+        let work = try scratchDirectory("install-record")
+        defer { try? FileManager.default.removeItem(at: work) }
+        let fixture = try await self.fixture(into: work)
+        _ = try install(fixture)
+        let build = try #require(try DeploymentContent.readBuild(at: DeploymentContent.record(beside: fixture.deployedVersion)))
+        #expect(build.builtAt == 100)
+        #expect(build.version == "9.9.9-test")
+        #expect(build.dylibHashes == (try MachOBuild.hashesIgnoringSignature(of: fixture.payload.dylib)))
+    }
+
+    @Test("An older package is refused before any installed files change")
+    func refusesDowngrade() async throws {
+        let work = try scratchDirectory("install-newer")
+        defer { try? FileManager.default.removeItem(at: work) }
+        let fixture = try await self.fixture(into: work)
+        _ = try install(fixture)
+        let record = DeploymentContent.record(beside: fixture.deployedVersion)
+        let newer = DeploymentContent.Build(version: "9.9.9-test", builtAt: 300)
+        try JSONEncoder().encode(newer).write(to: record)
+        let before = try Data(contentsOf: fixture.deployedDylib)
+        let calls = Calls()
+
+        let error = try #require(throws: StepFailure.self) { try install(fixture, calls: calls, stopped: true) }
+
+        #expect(error.detail.contains("newer NotProton"))
+        #expect(try Data(contentsOf: fixture.deployedDylib) == before)
+        #expect(try DeploymentContent.readBuild(at: record) == newer)
+        #expect(calls.registrations.isEmpty)
+    }
+
+    @Test("Changed helpers are updated without replacing the matching dylib")
+    func updatesHelperOnly() async throws {
+        let work = try scratchDirectory("install-helper")
+        defer { try? FileManager.default.removeItem(at: work) }
+        let fixture = try await self.fixture(into: work)
+        _ = try install(fixture)
+        let before = try Data(contentsOf: fixture.deployedDylib)
+        let helper = try Data(contentsOf: fixture.payload.appinfo)
+        try Data(repeating: 7, count: helper.count).write(to: fixture.appinfo)
+
+        let result = try install(fixture, stopped: true)
+
+        #expect(result.stoppedClient)
+        #expect(!result.backedUpPlist)
+        #expect(try Data(contentsOf: fixture.appinfo) == helper)
+        #expect(try Data(contentsOf: fixture.deployedDylib) == before)
+    }
+
+    @Test("Repairing missing pinned components stops Steam even when bundled files already match")
+    func pinnedRepairStopsSteam() async throws {
+        let work = try scratchDirectory("install-pinned")
+        defer { try? FileManager.default.removeItem(at: work) }
+        let fixture = try await self.fixture(into: work)
+        _ = try install(fixture)
+        #expect(try install(fixture, stopped: true).stoppedClient)
+    }
+
+    @Test("Install updates every deployed tool's script and runner bridge copy")
+    func updatesScriptsAndRunnerCopies() async throws {
+        let work = try scratchDirectory("install-scripts")
+        defer { try? FileManager.default.removeItem(at: work) }
+        let fixture = try await self.fixture(into: work)
+        let runners = fixture.support.appending(path: "runners")
+        let build = SupportedRunners.all[0]
+        let runner = SupportPaths.clonedRoot(forBuild: build.id, runners: runners)
+        try FileManager.default.createDirectory(at: runner.appending(path: "lib/wine"), withIntermediateDirectories: true)
+
+        _ = try install(fixture)
+
+        let tools = CompatToolList.installed(runners: runners, file: fixture.support.appending(path: "tools"))
+        try #require(!tools.isEmpty)
+        for tool in tools {
+            let script = work.appending(path: "compatibilitytools.d/\(tool.name)/run")
+            #expect(try Data(contentsOf: script) == Data(contentsOf: fixture.payload.run))
+            #expect(FileManager.default.isExecutableFile(atPath: script.path))
+        }
+        let bridge = try BridgePayload.locate()
+        let files = DeploymentContent.files(payload: fixture.payload, bridgePayload: bridge, app: fixture.app,
+                                            bridge: fixture.bridge, signatures: fixture.signatures,
+                                            overlayShim: fixture.overlayShim, iconmaker: fixture.iconmaker,
+                                            appinfo: fixture.appinfo, compatTools: work.appending(path: "compatibilitytools.d"),
+                                            tools: tools, runners: runners)
+        #expect(try files.allSatisfy { try $0.matches() })
+    }
+
+    @Test("A running game prevents file replacement before Steam is stopped")
+    func refusesRunningRunner() async throws {
+        let work = try scratchDirectory("install-running")
+        defer { try? FileManager.default.removeItem(at: work) }
+        let fixture = try await self.fixture(into: work)
+        let runner = SupportPaths.clonedRoot(forBuild: SupportedRunners.all[0].id,
+                                            runners: fixture.support.appending(path: "runners"))
+        try FileManager.default.createDirectory(at: runner.appending(path: "lib/wine"), withIntermediateDirectories: true)
+
+        let error = try #require(throws: StepFailure.self) { try install(fixture, running: true) }
+
+        #expect(error.detail.contains("is running"))
+        #expect(!FileManager.default.fileExists(atPath: fixture.bridge.path))
+        #expect(!FileManager.default.fileExists(atPath: fixture.deployedDylib.path))
+    }
+
+    @Test("Wine running from an unsupported clone also blocks installation")
+    func refusesRunningOrphan() async throws {
+        let work = try scratchDirectory("install-orphan")
+        defer { try? FileManager.default.removeItem(at: work) }
+        let fixture = try await self.fixture(into: work)
+        let runner = SupportPaths.clonedRoot(forBuild: "99.0.0.12345", runners: fixture.support.appending(path: "runners"))
+        try FileManager.default.createDirectory(at: runner.appending(path: "lib/wine"), withIntermediateDirectories: true)
+        let error = try #require(throws: StepFailure.self) { try install(fixture, running: true) }
+        #expect(error.detail.contains("99.0.0.12345"))
+        #expect(!FileManager.default.fileExists(atPath: fixture.deployedDylib.path))
+    }
+
+    @Test("A recognized runner folder with invalid binaries is refused before deployment")
+    func validatesExistingRunner() async throws {
+        let work = try scratchDirectory("install-runner-validation")
+        defer { try? FileManager.default.removeItem(at: work) }
+        let fixture = try await self.fixture(into: work)
+        let runners = fixture.support.appending(path: "runners")
+        let build = SupportedRunners.all[0]
+        let runner = SupportPaths.clonedRoot(forBuild: build.id, runners: runners)
+        try FileManager.default.createDirectory(at: runner.appending(path: "lib/wine/x86_64-unix"), withIntermediateDirectories: true)
+        try Data("wrong loader".utf8).write(to: runner.appending(path: "lib/wine/x86_64-unix/wine"))
+        let error = try #require(throws: StepFailure.self) {
+            try install(fixture, verifyRunner: RunnerInstaller.verifyClone)
+        }
+        #expect(error.detail.contains("does not match"))
+        #expect(!FileManager.default.fileExists(atPath: fixture.bridge.path))
+        #expect(!FileManager.default.fileExists(atPath: fixture.deployedDylib.path))
+    }
+
+    @Test("An install writes no build record until it is finished")
+    func defersRecord() async throws {
+        let work = try scratchDirectory("install-deferred")
+        defer { try? FileManager.default.removeItem(at: work) }
+        let fixture = try await self.fixture(into: work)
+        _ = try install(fixture, recordBuild: false)
+        #expect(!FileManager.default.fileExists(atPath: DeploymentContent.record(beside: fixture.deployedVersion).path))
+        #expect(!FileManager.default.fileExists(atPath: fixture.deployedVersion.path))
+    }
+
+    @Test("Finishing records the build")
+    func finishRecordsBuild() async throws {
+        let work = try scratchDirectory("install-finish")
+        defer { try? FileManager.default.removeItem(at: work) }
+        let fixture = try await self.fixture(into: work)
+        let outcome = try install(fixture, recordBuild: false)
+
+        try SteamInstaller.finish(outcome, deployedVersion: fixture.deployedVersion, isCurrent: { _ in true })
+
+        #expect(try DeploymentContent.readBuild(at: DeploymentContent.record(beside: fixture.deployedVersion)) == outcome.build)
+        #expect(try String(contentsOf: fixture.deployedVersion, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines) == "9.9.9-test")
+    }
+
+    @Test("Finishing records nothing when the installed content is not current")
+    func finishRefusesUnverifiedContent() async throws {
+        let work = try scratchDirectory("install-unverified")
+        defer { try? FileManager.default.removeItem(at: work) }
+        let fixture = try await self.fixture(into: work)
+        let outcome = try install(fixture, recordBuild: false)
+
+        #expect(throws: StepFailure.self) {
+            try SteamInstaller.finish(outcome, deployedVersion: fixture.deployedVersion, isCurrent: { _ in false })
+        }
+        #expect(!FileManager.default.fileExists(atPath: DeploymentContent.record(beside: fixture.deployedVersion).path))
+        #expect(!FileManager.default.fileExists(atPath: fixture.deployedVersion.path))
     }
 }

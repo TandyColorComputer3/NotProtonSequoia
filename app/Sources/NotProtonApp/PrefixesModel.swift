@@ -11,12 +11,23 @@ final class PrefixesModel {
     private(set) var prefixes: [WinePrefix] = []
     private(set) var usage: [String: PrefixUsage] = [:]
     private(set) var isLoading = false
-    private(set) var arch: [String: PrefixArch] = [:]
-    private(set) var expectedArch: PrefixArch = .arm64
+    private(set) var records: [String: PrefixBuildRecord] = [:]
+    private(set) var tools: [InstalledTool] = []
 
-    func isForeign(_ prefix: WinePrefix) -> Bool {
-        guard let built = arch[prefix.id] else { return false }
-        return built != expectedArch
+    private(set) var stale: Set<String> = []
+
+    // True when no installed compatibility tool matches the version of CrossOver that last
+    // booted the prefix.
+    func isStale(_ prefix: WinePrefix) -> Bool {
+        stale.contains(prefix.id)
+    }
+
+    private(set) var currentTools: [String: InstalledTool] = [:]
+
+    func lastTool(_ prefix: WinePrefix) -> String? {
+        if let tool = currentTools[prefix.id] { return tool.display }
+        guard let record = records[prefix.id] else { return nil }
+        return record.display ?? SupportedRunners.displayVersion(forID: record.build)
     }
 
     private(set) var hasLoaded = false
@@ -38,7 +49,7 @@ final class PrefixesModel {
 
     enum Confirmation: Equatable {
         case delete([WinePrefix])
-        case rebuild([WinePrefix])
+        case rebuild([WinePrefix], InstalledTool)
         case backUp([WinePrefix])
         case deleteBackups([PrefixBackup])
     }
@@ -53,22 +64,22 @@ final class PrefixesModel {
     }
 
     private let libraries: @Sendable () -> [SteamLibrary]
-    private let runnerArch: @Sendable () -> PrefixArch
-    private let rebuild: @Sendable (WinePrefix, Bool) throws -> URL?
+    private let installedTools: @Sendable () -> [InstalledTool]
+    private let rebuild: @Sendable (WinePrefix, InstalledTool, Bool) throws -> URL?
     private let makeBackup: @Sendable (WinePrefix) throws -> URL
 
     init(
         libraries: @escaping @Sendable () -> [SteamLibrary] = { PrefixStore.libraries() },
-        runnerArch: @escaping @Sendable () -> PrefixArch = { PrefixTools.prefixArch() },
-        rebuild: @escaping @Sendable (WinePrefix, Bool) throws -> URL? = {
-            try PrefixTools.recreate($0, keepBackup: $1)
+        installedTools: @escaping @Sendable () -> [InstalledTool] = { CompatToolList.installed() },
+        rebuild: @escaping @Sendable (WinePrefix, InstalledTool, Bool) throws -> URL? = {
+            try PrefixTools.recreate($0, as: $1, keepBackup: $2)
         },
         makeBackup: @escaping @Sendable (WinePrefix) throws -> URL = {
             try PrefixTools.backUp($0)
         }
     ) {
         self.libraries = libraries
-        self.runnerArch = runnerArch
+        self.installedTools = installedTools
         self.rebuild = rebuild
         self.makeBackup = makeBackup
     }
@@ -84,12 +95,23 @@ final class PrefixesModel {
         let found = await Task.detached { PrefixStore.all(libraries: roots) }.value
         guard run == loadGeneration else { return }
         prefixes = found
-        usage = [:]
-        expectedArch = runnerArch()
-        arch = await Task.detached {
-            found.reduce(into: [String: PrefixArch]()) { built, prefix in
-                if let found = PrefixStore.arch(of: prefix) { built[prefix.id] = found }
+        usage = usage.filter { id, _ in found.contains { $0.id == id } }
+        let listTools = installedTools
+        (tools, records, stale, currentTools) = await Task.detached {
+            let tools = listTools()
+            var records: [String: PrefixBuildRecord] = [:]
+            var stale = Set<String>()
+            var current: [String: InstalledTool] = [:]
+            for prefix in found {
+                guard let record = PrefixTools.lastBuild(of: prefix) else { continue }
+                records[prefix.id] = record
+                if let tool = PrefixTools.tool(for: prefix, among: tools) {
+                    current[prefix.id] = tool
+                } else {
+                    stale.insert(prefix.id)
+                }
             }
+            return (tools, records, stale, current)
         }.value
         guard run == loadGeneration else { return }
         selection = selection.filter { id in found.contains { $0.id == id } }
@@ -143,9 +165,16 @@ final class PrefixesModel {
         }
     }
 
-    func recreate(_ targets: [WinePrefix], keepBackup: Bool = true) async {
+    @discardableResult
+    func confirmRebuild(keepBackup: Bool = true) -> Task<Void, Never>? {
+        guard case .rebuild(let targets, let tool) = pendingConfirmation else { return nil }
+        pendingConfirmation = nil
+        return Task { await recreate(targets, as: tool, keepBackup: keepBackup) }
+    }
+
+    func recreate(_ targets: [WinePrefix], as tool: InstalledTool, keepBackup: Bool = true) async {
         let make = rebuild
-        await eachInTurn(targets, { try make($0, keepBackup) }) { rebuilt in
+        await eachInTurn(targets, { try make($0, tool, keepBackup) }) { rebuilt in
             let kept = rebuilt.compactMap(\.made)
             if rebuilt.count == 1 {
                 let title = rebuilt[0].prefix.title

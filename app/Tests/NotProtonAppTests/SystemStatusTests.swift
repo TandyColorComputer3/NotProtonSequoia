@@ -423,7 +423,7 @@ struct ActivationQuestionTests {
     func installWithToolAsksNothing() {
         #expect(
             SystemStatus.activationQuestion(
-                .install, licensed: false, runner: .cloned(build: "27.0.0.40921", supported: true)
+                .install, licensed: false, runner: .ready(builds: ["27.0.0.40921"])
             ) == nil
         )
     }
@@ -437,7 +437,7 @@ struct ActivationQuestionTests {
     // whatever is already set up.
     @Test("Setting up the tool asks whenever CrossOver is unactivated")
     func unactivatedToolAsks() {
-        for runner in [RunnerState.none, .cloned(build: "27.0.0.40921", supported: true)] {
+        for runner in [RunnerState.none, .ready(builds: ["27.0.0.40921"])] {
             #expect(
                 SystemStatus.activationQuestion(.compatibilityTool, licensed: false, runner: runner)
                     == .toolUnlicensed
@@ -468,9 +468,15 @@ struct ActivationQuestionTests {
 @Suite("Run bookkeeping")
 struct PerformTests {
 
+    private func quietStatus() -> SystemStatus {
+        let status = SystemStatus()
+        status.refreshAfterRun = { _ in }
+        return status
+    }
+
     @Test("A run ends carrying what its body said")
     func outcomeComesFromTheBody() async {
-        let status = SystemStatus()
+        let status = quietStatus()
 
         await status.perform(from: "Working") { _ in "Done." }
 
@@ -480,7 +486,7 @@ struct PerformTests {
 
     @Test("A run with nothing to say leaves no outcome behind")
     func nothingToSayLeavesNoOutcome() async {
-        let status = SystemStatus()
+        let status = quietStatus()
 
         await status.perform(from: "Working") { _ in "Done." }
         await status.perform(from: "Working") { _ in nil }
@@ -490,7 +496,7 @@ struct PerformTests {
 
     @Test("A run drops the failure the one before it left")
     func aRunClearsTheEarlierFailure() async {
-        let status = SystemStatus()
+        let status = quietStatus()
         status.setFailure("Old news.")
 
         await status.perform(from: "Working") { _ in "Done." }
@@ -501,7 +507,7 @@ struct PerformTests {
 
     @Test("A body that throws ends the run as a failure and not as an outcome")
     func aThrownErrorIsRecorded() async {
-        let status = SystemStatus()
+        let status = quietStatus()
         // Left by an earlier run, so a failure has something to clear. Without it the
         // outcome is already nil and the run never has to drop anything.
         await status.perform(from: "Working") { _ in "Done." }
@@ -516,7 +522,7 @@ struct PerformTests {
 
     @Test("The opening label is on screen before the body starts")
     func theOpeningLabelIsUpFirst() async {
-        let status = SystemStatus()
+        let status = quietStatus()
         var seen: String?
 
         await status.perform(from: "Cloning") { _ in
@@ -529,7 +535,7 @@ struct PerformTests {
 
     @Test("A run counts as busy until it is over")
     func busyForTheWholeRun() async {
-        let status = SystemStatus()
+        let status = quietStatus()
         var busyMidRun = false
 
         await status.perform(from: "Working") { progress in
@@ -540,5 +546,16 @@ struct PerformTests {
 
         #expect(busyMidRun)
         #expect(!status.isBusy)
+    }
+
+    @Test("A run refreshes the status before it stops counting as busy")
+    func refreshesBeforeTheRunEnds() async {
+        let status = SystemStatus()
+        var busyDuringRefresh: Bool?
+        status.refreshAfterRun = { busyDuringRefresh = $0.isBusy }
+
+        await status.perform(from: "Working") { _ in "Done." }
+
+        #expect(busyDuringRefresh == true)
     }
 }

@@ -108,6 +108,19 @@ int main(void) {
     const char *once[] = { "PATH=/bin", NULL };
     survives(twice, once, "every copy of the insert is taken out");
 
+    char *blocked[] = { (char *)"PATH=/bin",
+                        (char *)"SDL_JOYSTICK_BLACKLIST_DEVICES=0x05ac/0x0004",
+                        (char *)"DYLD_INSERT_LIBRARIES=/x.dylib", NULL };
+    survives(blocked, once, "the SDL block list goes with the insert");
+
+    char *alone[] = { (char *)"SDL_JOYSTICK_BLACKLIST_DEVICES=0x05ac/0x0004",
+                      (char *)"PATH=/bin", NULL };
+    survives(alone, once, "the SDL block list goes without the insert");
+
+    char *sdl[] = { (char *)"SDL_JOYSTICK_BLACKLIST_DEVICES_EXCLUDED=0x05ac/0x0004",
+                    (char *)"SDL_GAMECONTROLLER_IGNORE_DEVICES=0x045e/0x028e", NULL };
+    survives(sdl, NULL, "other SDL lists stay");
+
     if (failures) {
         printf("==> spawn env: %d check(s) failed\n", failures);
         return 1;

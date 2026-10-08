@@ -35,6 +35,8 @@ size_t np_compat_tool_stride(void) { return 0x130 + stub_tool_shift; }
 
 uint32_t np_compat_enabled_off(void) { return stub_enabled_off_val; }
 
+uint32_t np_compat_manager_tools_max(void) { return 40; }
+
 uint32_t np_compat_valid_platforms(void *mgr, uint32_t appid) {
     (void)mgr; (void)appid;
     return stub_platforms_val;

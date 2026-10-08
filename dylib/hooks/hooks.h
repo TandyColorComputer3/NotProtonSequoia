@@ -23,7 +23,6 @@ typedef struct {
     void            *entry;
     void           **trampoline;
     np_patch_mode_t  mode;
-    int              tolerate_missing;   // when set, an unresolved signature only logs at debug
 } np_patch_entry_t;
 
 int               np_hooks_compat_count(void);
@@ -44,6 +43,9 @@ np_patch_entry_t *np_hooks_webui_defs(void);
 void np_hooks_webui_bind(const struct mach_header_64 *mh, intptr_t slide,
                          uintptr_t register_fn, uintptr_t dispatch_fn);
 
+int               np_hooks_launch_count(void);
+np_patch_entry_t *np_hooks_launch_defs(void);
+
 int               np_hooks_shortcut_count(void);
 np_patch_entry_t *np_hooks_shortcut_defs(void);
 
@@ -59,6 +61,8 @@ int np_hooks_install_steamui(const struct mach_header_64 *mh, intptr_t slide,
 // True when `label` is one entry of the comma-separated value of env var `var`.
 // NOTPROTON_DISABLE uses this to skip named hooks.
 int np_hooks_env_lists_label(const char *var, const char *label);
+
+void np_hooks_launch_install(const struct mach_header_64 *mh, intptr_t slide);
 
 // Resolved from libc rather than the signature database, and installed before the client
 // can spawn anything, so this one does not wait for steamclient the way the rest do.

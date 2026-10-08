@@ -92,21 +92,64 @@ struct SupportedRunnerTests {
     }
 }
 
-@Suite("Runner store")
-struct RunnerStoreTests {
+@Suite("Steam tools")
+struct CompatToolOrderTests {
 
-    @Test("The build comes out of the crossover- path component")
-    func buildIdentifierParsing() {
-        #expect(RunnerStore.buildIdentifier(
-            inPath: "crossover-27.0.0.40921/CrossOver Preview.app/Contents/SharedSupport/CrossOver"
-        ) == "27.0.0.40921")
+    private func build(_ id: String) throws -> RunnerBuild {
+        try #require(SupportedRunners.build(id: id))
+    }
 
-        #expect(RunnerStore.buildIdentifier(
-            inPath: "../runners/crossover-1.2.3/CrossOver Preview.app/Contents/SharedSupport/CrossOver"
-        ) == "1.2.3")
+    @Test("Tools come out in preference order whatever order the builds are in")
+    func order() throws {
+        let tools = SupportedRunners.tools(for: [
+            try build("26.3.0.39832"), try build("27.0.0.40921-fex"),
+        ])
+        #expect(tools.map(\.name) == ["notproton-fex", "notproton-fex-rosetta", "notproton-26.3"])
+        #expect(tools.map(\.build) == ["27.0.0.40921-fex", "27.0.0.40921-fex", "26.3.0.39832"])
+    }
 
-        #expect(RunnerStore.buildIdentifier(inPath: "CrossOver Preview.app/Contents") == nil)
-        #expect(RunnerStore.buildIdentifier(inPath: "") == nil)
+    @Test("Each Preview keeps its own tools when both are set up")
+    func bothPreviews() throws {
+        let tools = SupportedRunners.tools(for: [
+            try build("27.0.0.40921-fex"), try build("27.0.0.40921"),
+        ])
+        #expect(tools.map(\.name) == ["notproton-fex", "notproton-fex-rosetta", "notproton-preview"])
+        #expect(tools.map(\.build) == ["27.0.0.40921-fex", "27.0.0.40921-fex", "27.0.0.40921"])
+        #expect(Set(tools.map(\.display)).count == tools.count)
+    }
+
+    @Test("The Rosetta-only Preview can hold the legacy name")
+    func rosettaPreviewAlone() throws {
+        let tools = SupportedRunners.tools(for: [try build("27.0.0.40921")], legacy: .build("27.0.0.40921"))
+        #expect(tools.map(\.name) == ["notproton"])
+        #expect(tools.first?.tool.flavor == .rosetta)
+    }
+
+    @Test("A named holder keeps the legacy name, and nobody leaves every Preview on its own name")
+    func explicitHolder() throws {
+        let builds = [try build("27.0.0.40921-fex"), try build("27.0.0.40921")]
+        let held = SupportedRunners.tools(for: builds, legacy: .build("27.0.0.40921"))
+        #expect(held.map(\.name) == ["notproton", "notproton-fex", "notproton-fex-rosetta"])
+        #expect(held.first?.build == "27.0.0.40921")
+        let none = SupportedRunners.tools(for: builds, legacy: .nobody)
+        #expect(none.map(\.name) == ["notproton-fex", "notproton-fex-rosetta", "notproton-preview"])
+    }
+
+    @Test("Every tool name is one the dylib accepts")
+    func namesParse() {
+        for tool in SupportedRunners.all.flatMap(\.tools) {
+            #expect(tool.name.hasPrefix("notproton"))
+            #expect(tool.name.contains("proton"))
+            #expect(tool.name.allSatisfy { $0.isLetter || $0.isNumber || "._-".contains($0) })
+            #expect(!tool.display.contains { "\"\\".contains($0) || $0.isNewline })
+        }
+    }
+
+    @Test("The list file has one tab-separated line per tool")
+    func contents() throws {
+        let tools = SupportedRunners.tools(for: [try build("26.3.0.39832")])
+        #expect(CompatToolList.contents(tools)
+            == "notproton-26.3\t26.3.0.39832\trosetta\tCrossOver 26.3\n")
     }
 }
 
@@ -153,8 +196,8 @@ struct SupportPathTests {
             .hasSuffix("/notproton/signatures/macos.arm64"))
         #expect(SupportPaths.overlayShim.path(percentEncoded: false)
             .hasSuffix("/notproton/overlay-shim.dylib"))
-        #expect(SupportPaths.currentRunner.path(percentEncoded: false)
-            .hasSuffix("/notproton/runners/current"))
+        #expect(SupportPaths.toolList.path(percentEncoded: false)
+            .hasSuffix("/notproton/tools"))
         #expect(SupportPaths.Steam.deployedDylib.path(percentEncoded: false)
             == "/Applications/Steam.app/Contents/MacOS/notproton.dylib")
         #expect(SupportPaths.Steam.infoPlist.path(percentEncoded: false)

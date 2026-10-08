@@ -4,6 +4,11 @@
 #include "../feats/compat.c"
 
 #include <stdio.h>
+#include <pthread.h>
+#include <stdatomic.h>
+
+static atomic_int home_calls;
+static atomic_int home_ready;
 
 // Silent, because half of these checks drive paths whose whole job is to refuse and log.
 int   np_log_level = -1;
@@ -15,6 +20,10 @@ int np_log_first_hit(const void *anchor, unsigned long tag) {
 }
 
 const char *np_home_dir(void) {
+    if (atomic_fetch_add(&home_calls, 1) == 0) {
+        usleep(50000);
+        atomic_store(&home_ready, 1);
+    }
     return "/nonexistent";
 }
 
@@ -25,6 +34,30 @@ static void check(int ok, const char *what) {
         printf("FAIL %s\n", what);
         failures++;
     }
+}
+
+static void *first_fallback(void *arg) {
+    int *ok = arg;
+    const char *name = np_compat_fallback_tool_name();
+    *ok = atomic_load(&home_ready) && strcmp(name, "notproton") == 0;
+    return NULL;
+}
+
+static void concurrent_fallback_cases(void) {
+    pthread_t threads[16];
+    int results[16] = {0};
+    size_t started = 0;
+    for (; started < 16; started++) {
+        if (pthread_create(&threads[started], NULL, first_fallback, &results[started]) != 0) {
+            check(0, "the fallback reader thread starts");
+            break;
+        }
+    }
+    for (size_t i = 0; i < started; i++) {
+        pthread_join(threads[i], NULL);
+        check(results[i], "every first fallback read waits for initialization");
+    }
+    check(atomic_load(&home_calls) == 2, "the tool list is initialized once");
 }
 
 // A64 encodings the probes look for.
@@ -149,7 +182,7 @@ static void enabled_cases(void) {
 
 // A manager holding `count` entries, the one at `named_slot` carrying the tool name.
 static uint8_t manager[0x400];
-static uint8_t entries[8 * (COMPAT_TOOL_STRIDE + 64)];
+static uint8_t entries[(COMPAT_MANAGER_TOOLS_HEADROOM + 64) * (COMPAT_TOOL_STRIDE + 64)];
 
 static void *build_manager(uint32_t count, int named_slot) {
     memset(manager, 0, sizeof manager);
@@ -176,9 +209,11 @@ static void manager_cases(void) {
 
     // A count this large means the offset it was read from moved, so the array it
     // describes is not one to walk.
-    check(np_compat_registered_tool(build_manager(COMPAT_MANAGER_TOOLS_MAX + 1, 1)) == NULL,
+    uint32_t cap = np_compat_manager_tools_max();
+    check(cap <= COMPAT_MANAGER_TOOLS_HEADROOM + 64, "the manager fixture holds the cap");
+    check(np_compat_registered_tool(build_manager(cap + 1, 1)) == NULL,
           "a count past the cap is refused rather than walked");
-    check(np_compat_registered_tool(build_manager(COMPAT_MANAGER_TOOLS_MAX, -1)) == NULL,
+    check(np_compat_registered_tool(build_manager(cap, -1)) == NULL,
           "a count at the cap is still walked");
 
     mgr = build_manager(3, 1);
@@ -191,6 +226,140 @@ static void manager_cases(void) {
     check(np_compat_registered_tool(mgr) == entries + 2 * np_compat_tool_stride(),
           "the walk steps by the live stride rather than the baseline");
     g_tool_shift = 0;
+}
+
+static void tool_list_cases(void) {
+    static const char path[] = "out/compatcheck-tools";
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        check(0, "the tool list fixture can be written");
+        return;
+    }
+    fputs("notproton\t27.0.0.40921-fex\tfex\tCrossOver Preview (FEX)\n"
+          "notproton-fex-rosetta\t27.0.0.40921-fex\trosetta\tCrossOver Preview (Rosetta)\n"
+          "notproton-26.3\t26.3.0.39832\trosetta\tCrossOver 26.3\n"
+          "notproton\t26.3.0.39832\trosetta\tDuplicate\n"
+          "proton-other\t1\trosetta\tForeign\n"
+          "notproton-x\t1\tarm\tBad flavor\n"
+          "notproton-q\t1\trosetta\tQuote\"d\n"
+          "notproton-short\t1\trosetta\n"
+          "\n", f);
+    fclose(f);
+
+    int kept = np_compat_load_tool_list(path, "/tools");
+    unlink(path);
+
+    check(kept == 3, "only well-formed, unique, notproton-named lines are kept");
+    check(strcmp(g_tools[0].name, "notproton") == 0
+          && strcmp(g_tools[0].flavor, "fex") == 0, "the first line stays first");
+    check(strcmp(g_tools[2].build, "26.3.0.39832") == 0
+          && strcmp(g_tools[2].dir, "/tools/notproton-26.3") == 0,
+          "each tool carries its build and directory");
+
+    uint8_t *mgr = build_manager(3, -1);
+    *(const char **)(entries + np_compat_tool_stride() + COMPAT_TOOL_NAME_OFF) = "notproton-26.3";
+    check(np_compat_registered_tool(mgr) == entries + np_compat_tool_stride(),
+          "the most preferred tool the manager holds is the default");
+    *(const char **)(entries + COMPAT_TOOL_NAME_OFF) = "notproton";
+    check(np_compat_registered_tool(mgr) == entries,
+          "the first listed tool wins when the manager holds it");
+
+    f = fopen(path, "w");
+    if (!f) {
+        check(0, "the long tool list fixture can be written");
+        return;
+    }
+    for (int i = 0; i < 40; i++)
+        fprintf(f, "notproton-%d\t1\trosetta\tTool %d\n", i, i);
+    fclose(f);
+    kept = np_compat_load_tool_list(path, "/tools");
+    unlink(path);
+    check(kept == 40 && strcmp(g_tools[39].name, "notproton-39") == 0
+          && strcmp(g_tools[0].dir, "/tools/notproton-0") == 0, "a long list keeps every tool");
+    check(strcmp(np_compat_fallback_tool_name(), "notproton-0") == 0,
+          "the fallback is the first configured tool");
+
+    check(np_compat_load_tool_list("out/compatcheck-missing", "/tools") == 0
+          && !g_tool_list_present, "a missing list keeps no tools and says so");
+}
+
+static void tool_launch_cases(void) {
+    static const char *tool[] = {
+        "'/tools/compatibilitytools.d/notproton/.'/run waitforexitandrun  '/g/game.exe'",
+        "A=1 '/tools/compatibilitytools.d/notproton-26.3/.'/run waitforexitandrun  '/g/game.exe' -x",
+        "'/tools/compatibilitytools.d/notproton-fex-rosetta/.'/run run ",
+        "'/tools/compatibilitytools.d/notproton'/run waitforexitandrun  '/g/game.exe'",
+        "'/Volumes/Ext/Steam/compatibilitytools.d/notproton/.'/run waitforexitandrun '/g/game.exe'",
+    };
+    static const char *native[] = {
+        "'/g/Game.app' -windowed",
+        "'/g/Game.app/Contents/MacOS/Game'",
+        "'/tools/compatibilitytools.d/proton-other/.'/run waitforexitandrun '/g/game.exe'",
+        "'/tools/compatibilitytools.d/notproton/Game' -x",
+        "'/tools/compatibilitytools.d/notproton/sub/.'/run waitforexitandrun '/g/game.exe'",
+        "'/tools/compatibilitytools.d/notproton'/other '/g/game.exe'",
+        "",
+    };
+    for (size_t i = 0; i < sizeof(tool) / sizeof(tool[0]); i++)
+        check(np_compat_runs_tool(tool[i]), tool[i]);
+    for (size_t i = 0; i < sizeof(native) / sizeof(native[0]); i++)
+        check(!np_compat_runs_tool(native[i]), native[i]);
+    check(!np_compat_runs_tool(NULL), "no command line is no tool launch");
+}
+
+static int put(const char *dir, const char *name, const char *text) {
+    char path[768];
+    snprintf(path, sizeof(path), "%s/%s", dir, name);
+    FILE *f = fopen(path, "w");
+    if (!f) return -1;
+    fputs(text, f);
+    return fclose(f);
+}
+
+static int exists(const char *path) {
+    return access(path, F_OK) == 0;
+}
+
+static void stale_tool_cases(void) {
+    char root[] = "out/compatcheck-toolsd.XXXXXX";
+    if (!mkdtemp(root)) {
+        check(0, "the tools directory fixture can be made");
+        return;
+    }
+    char current[700], legacy[700], user[700], lookalike[700];
+    snprintf(current, sizeof(current), "%s/notproton-26.3", root);
+    snprintf(legacy, sizeof(legacy), "%s/notproton", root);
+    snprintf(user, sizeof(user), "%s/notproton-mine", root);
+    snprintf(lookalike, sizeof(lookalike), "%s/notproton-copy", root);
+    const char *dirs[] = { current, legacy, user, lookalike };
+    for (size_t i = 0; i < 4; i++) mkdir(dirs[i], 0755);
+
+    put(current, "flavor", "rosetta\n");
+    put(current, "run", "#!/bin/sh\n# notproton CrossOver compatibility tool shim\n");
+    put(legacy, "run", "#!/bin/sh\n# notproton CrossOver compatibility tool shim\nset -e\n");
+    put(legacy, "toolmanifest.vdf", "\"manifest\" {}\n");
+    put(legacy, "compatibilitytool.vdf", "\"compatibilitytools\" {}\n");
+    put(user, "run", "#!/bin/sh\nexec my-wine \"$@\"\n");
+    put(lookalike, "run", "#!/bin/sh\n# notproton CrossOver compatibility tool shim\n");
+    put(lookalike, "notes.txt", "mine\n");
+
+    g_tool_count = 0;
+    remove_unlisted_tools(root);
+
+    check(!exists(current), "an unlisted tool with a flavor file is removed");
+    check(!exists(legacy), "the single-tool dylib's directory is removed");
+    check(exists(user), "a notproton directory the user wrote stays");
+    char notes[768];
+    snprintf(notes, sizeof(notes), "%s/notes.txt", lookalike);
+    check(exists(notes), "files this project did not write stay with their directory");
+
+    remove(notes);
+    char path[768];
+    snprintf(path, sizeof(path), "%s/run", user);
+    remove(path);
+    rmdir(user);
+    rmdir(lookalike);
+    rmdir(root);
 }
 
 static uint32_t stub_platforms_value;
@@ -268,10 +437,14 @@ static void installed_fn_cases(void) {
 }
 
 int main(void) {
+    concurrent_fallback_cases();
     probe_cases();
     oslist_cases();
     enabled_cases();
     manager_cases();
+    tool_list_cases();
+    tool_launch_cases();
+    stale_tool_cases();
     installed_fn_cases();
 
     if (failures) {

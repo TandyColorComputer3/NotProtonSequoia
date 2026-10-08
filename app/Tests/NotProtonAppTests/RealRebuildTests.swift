@@ -13,10 +13,11 @@ enum RealPrefixes {
 
     // One prefix per profile shape: steamuser real, steamuser linked, and both real, which is
     // the shape a save was lost from. All three have to come out on the steamuser layout.
+    static var tool: InstalledTool? { CompatToolList.installed().first }
+
     static var candidates: [WinePrefix] {
-        let loader = PrefixTools.layout(runner: SupportPaths.currentRunner).unixDir
-        guard FileManager.default.fileExists(
-            atPath: loader.path(percentEncoded: false)) else { return [] }
+        guard ProcessInfo.processInfo.environment["NOTPROTON_TEST_WINE"] == "1" else { return [] }
+        guard tool != nil else { return [] }
         func realDirectory(_ url: URL) -> Bool {
             let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey, .isDirectoryKey])
             return values?.isSymbolicLink != true && values?.isDirectory == true
@@ -97,7 +98,8 @@ struct RealRebuildTests {
                 at: stray.deletingLastPathComponent(), withIntermediateDirectories: true)
             try Data("exe".utf8).write(to: stray)
 
-            try PrefixTools.recreate(prefix)
+            let tool = try #require(RealPrefixes.tool)
+            try PrefixTools.recreate(prefix, as: tool)
             let after = inventory(prefix.pfx)
 
             // Both profile names fold to one directory after a rebuild, as do the documents names
@@ -149,9 +151,9 @@ struct RealRebuildTests {
                         "\(prefix.appID) resolves \(folder) to \(resolved)")
             }
 
-            // The windows tree is the fresh one, for the arch the installed runner builds.
             let ntdll = prefix.pfx.appending(path: "drive_c/windows/system32/ntdll.dll")
-            #expect(PrefixStore.arch(of: prefix) == PrefixTools.prefixArch())
+            #expect(PrefixStore.arch(of: prefix) == tool.tool.prefixArch)
+            #expect(PrefixTools.buildRecord(of: prefix)?.build == tool.build)
             #expect(FileManager.default.fileExists(atPath: ntdll.path(percentEncoded: false)))
         }
     }

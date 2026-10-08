@@ -324,9 +324,10 @@ struct NtdllPatcherTests {
 
     // The point of the port: the same input has to come out as the bytes apply.py and
     // apply32.py produced, which SupportedRunners records. Needs an unpatched CrossOver.
-    @Test("Patching the unpatched ntdll reproduces the recorded hashes")
-    func realNtdllReproducesRecordedHashes() throws {
-        let root = URL(filePath: "/Applications/CrossOver Preview.app/Contents/SharedSupport/CrossOver")
+    @Test("Patching the unpatched ntdll reproduces the recorded hashes",
+          arguments: ["CrossOver Preview", "CrossOver"])
+    func realNtdllReproducesRecordedHashes(app: String) throws {
+        let root = URL(filePath: "/Applications/\(app).app/Contents/SharedSupport/CrossOver")
         guard FileManager.default.fileExists(atPath: root.path(percentEncoded: false)),
               let installed = Digest.sha256IfPresent(CrossOverSource.unixLoader(inRoot: root)),
               let build = SupportedRunners.build(loaderSHA256: installed)
@@ -395,7 +396,7 @@ struct NtdllPatcherTests {
     // The bridge here came out of apply.py and apply32.py, so staging from the same clone has
     // to be byte identical. A clean ntdll cannot be a fixture, so no runner means skip.
     private static func cleanRunnerRoot(for build: RunnerBuild) -> URL? {
-        let root = SupportPaths.currentRunner
+        let root = SupportPaths.clonedRoot(forBuild: build.id)
         guard FileManager.default.fileExists(
             atPath: root.appending(path: "lib/wine").path(percentEncoded: false)
         ) else { return nil }
@@ -427,9 +428,8 @@ struct NtdllPatcherTests {
 
         var compared: [WineArch] = []
         for patch in NtdllPatcher.patches(for: build) {
-            let relative = "wine/\(patch.arch.rawValue)/ntdll.dll"
-            let staged = scratch.appending(path: relative)
-            let existing = SupportPaths.bridge.appending(path: relative)
+            let staged = NtdllPatcher.stagedCopy(of: patch.arch, build: build.id, in: scratch)
+            let existing = NtdllPatcher.stagedCopy(of: patch.arch, build: build.id)
 
             #expect(Digest.sha256IfPresent(staged) == build.patchedNtdll[patch.arch])
             guard let live = Digest.sha256IfPresent(existing) else { continue }
@@ -440,7 +440,7 @@ struct NtdllPatcherTests {
         // A staged bridge that matched nothing is a test that skipped. Asked per build rather
         // than against a fixed arch, so a bridge of another flavor does not stand this down.
         let bridgeHoldsThisBuild = build.patchedNtdll.keys.contains { arch in
-            Digest.sha256IfPresent(SupportPaths.bridge.appending(path: "wine/\(arch.rawValue)/ntdll.dll")) != nil
+            Digest.sha256IfPresent(NtdllPatcher.stagedCopy(of: arch, build: build.id)) != nil
         }
         if bridgeHoldsThisBuild {
             #expect(compared.count == build.patchedNtdll.count)
@@ -494,23 +494,22 @@ struct NtdllStagingTests {
 
         var hashes: [WineArch: String] = [:]
         for arch in WineArch.allCases {
-            let directory = bridge.appending(path: "wine/\(arch.rawValue)")
+            let directory = bridge.appending(path: "wine/27.0.0.40921/\(arch.rawValue)")
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let file = directory.appending(path: "ntdll.dll")
             try Data("staged \(arch.rawValue)".utf8).write(to: file)
             hashes[arch] = try Digest.sha256(of: file)
         }
 
-        // The FEX flavor, which patches i386 and aarch64 and leaves x86_64 alone.
         let build = RunnerBuild(
             bundleVersion: "27.0.0.40921",
             releaseVersion: "20260821",
-            flavor: "fex",
+            flavor: nil,
             loaderSHA256: "unused",
             cleanNtdll: [:],
             patchedNtdll: [
+                .x86_64Windows: hashes[.x86_64Windows]!,
                 .i386Windows: hashes[.i386Windows]!,
-                .aarch64Windows: hashes[.aarch64Windows]!,
             ]
         )
         return (bridge, build)
@@ -527,12 +526,74 @@ struct NtdllStagingTests {
         #expect(written.isEmpty)
 
         let fm = FileManager.default
-        for arch in [WineArch.i386Windows, .aarch64Windows] {
-            let kept = bridge.appending(path: "wine/\(arch.rawValue)/ntdll.dll")
+        for arch in [WineArch.x86_64Windows, .i386Windows] {
+            let kept = NtdllPatcher.stagedCopy(of: arch, build: build.id, in: bridge)
             #expect(fm.fileExists(atPath: kept.path(percentEncoded: false)))
         }
 
-        let foreign = bridge.appending(path: "wine/x86_64-windows/ntdll.dll")
+        let foreign = NtdllPatcher.stagedCopy(of: .aarch64Windows, build: build.id, in: bridge)
         #expect(!fm.fileExists(atPath: foreign.path(percentEncoded: false)))
+    }
+
+    @Test("Restaging installed builds reports a build it cannot stage and carries on")
+    func stageInstalledCollectsFailures() throws {
+        let (bridge, build) = try stagedBridge()
+        defer { try? FileManager.default.removeItem(at: bridge) }
+        let broken = SupportedRunners.all[0]
+
+        let failures = NtdllPatcher.stageInstalled(
+            builds: [broken, build], runners: bridge.appending(path: "runners"), bridge: bridge
+        )
+
+        #expect(failures.map(\.build) == [broken.id])
+        #expect(FileManager.default.fileExists(atPath: NtdllPatcher.stagedCopy(
+            of: .x86_64Windows, build: build.id, in: bridge).path(percentEncoded: false)))
+    }
+
+    @Test("Pruning keeps the listed builds and drops every other entry under wine")
+    func pruneKeepsListedBuilds() throws {
+        let (bridge, build) = try stagedBridge()
+        defer { try? FileManager.default.removeItem(at: bridge) }
+        let fm = FileManager.default
+        let other = bridge.appending(path: "wine/26.3.0.39832")
+        let legacy = bridge.appending(path: "wine/x86_64-windows")
+        for directory in [other, legacy] {
+            try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+
+        NtdllPatcher.pruneBuilds(keeping: [build.id], in: bridge)
+
+        #expect(fm.fileExists(atPath: NtdllPatcher.stagedCopy(
+            of: .x86_64Windows, build: build.id, in: bridge).path(percentEncoded: false)))
+        #expect(!fm.fileExists(atPath: other.path(percentEncoded: false)))
+        #expect(!fm.fileExists(atPath: legacy.path(percentEncoded: false)))
+    }
+}
+
+@Suite("Pinned patch payloads")
+struct PinnedPatchPayloadTests {
+
+    @Test("Every pinned patch ships a payload that matches its pin")
+    func everyPinnedPayloadResolves() throws {
+        for (buildID, patches) in NtdllPatcher.byBuild {
+            for patch in patches {
+                #expect(throws: Never.self, "\(buildID) \(patch.arch.rawValue)") {
+                    _ = try NtdllPatcher.payload(for: patch)
+                }
+            }
+        }
+    }
+
+    @Test("Every pinned payload fits inside the cave it is written to")
+    func everyPinnedPayloadFitsItsCave() throws {
+        for (buildID, patches) in NtdllPatcher.byBuild {
+            for patch in patches {
+                let payload = try NtdllPatcher.payload(for: patch)
+                let where_ = "\(buildID) \(patch.arch.rawValue)"
+                #expect(patch.payloadRVA >= patch.caveRVA, "\(where_) starts before its cave")
+                let end = patch.payloadRVA + payload.count
+                #expect(end <= patch.caveRVA + patch.caveSize, "\(where_) overruns its cave")
+            }
+        }
     }
 }

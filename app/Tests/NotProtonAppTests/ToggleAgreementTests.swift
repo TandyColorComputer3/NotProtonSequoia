@@ -1,11 +1,8 @@
-import Darwin
 import Foundation
 import Testing
 
 @testable import NotProtonApp
 
-// webpatch.c writes the Compatibility page toggles and compat_run.sh decides which tokens are
-// environment rather than game arguments. Nothing at build time holds the two together.
 @Suite("Toggle agreement")
 struct ToggleAgreementTests {
 
@@ -33,26 +30,27 @@ struct ToggleAgreementTests {
         return names
     }
 
-    static func allowedPatterns(in compat: String) throws -> [String] {
-        let line = try #require(
-            compat.split(separator: "\n").first { $0.contains("*=*|") },
-            "compat_run.sh no longer has a launch option allowlist")
-        return line.matches(of: try Regex(#"([A-Z0-9_]+\*?=\*)"#))
-            .map { String($0[1].substring ?? "") }
-    }
+    static let ownedNames: Set<String> = ["WINEPREFIX", "WINELOADER", "WINESERVER", "PATH"]
 
-    @Test("Every Compatibility page toggle is exported rather than passed to the game")
+    @Test("Every Compatibility page toggle reaches the game as an environment variable")
     func togglesAreNamespaced() throws {
-        let names = try Self.toggleNames(in: try Self.source("dylib/feats/webpatch.c"))
-        let patterns = try Self.allowedPatterns(in: try Self.source("dylib/feats/compat_run.sh"))
+        let webpatch = try Self.source("dylib/feats/webpatch.c")
+        let names = try Self.toggleNames(in: webpatch)
 
         #expect(names.count >= 8, "found \(names.count) toggles, the parse looks wrong")
-        #expect(!patterns.isEmpty)
+
+        #expect(
+            webpatch.contains(#"r=add+\" %command%\""#),
+            "webpatch.c no longer writes %command%, so the toggles would reach the game as arguments"
+        )
 
         for name in names.sorted() {
-            let token = "\(name)=1"
-            let covered = patterns.contains { fnmatch($0, token, 0) == 0 }
-            #expect(covered, "\(name) matches no allowlist pattern in compat_run.sh, so it reads as unset")
+            #expect(
+                !Self.ownedNames.contains(name),
+                "\(name) is set by compat_run.sh, so the panel would write a value it overwrites")
+            #expect(
+                name.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_") },
+                "\(name) is not a name sh can export, so it would reach the game as an argument")
         }
     }
 }

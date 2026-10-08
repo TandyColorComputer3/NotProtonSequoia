@@ -1,6 +1,7 @@
 #include "macho.h"
 #include <mach-o/dyld.h>
 #include <mach-o/nlist.h>
+#include <sys/mman.h>
 #include <signal.h>
 #include <string.h>
 #include <unistd.h>
@@ -377,4 +378,53 @@ uintptr_t np_import_stub_for_symbol(const struct mach_header_64 *mh, intptr_t sl
         }
     }
     return found;
+}
+
+int np_rebind_import(const struct mach_header_64 *mh, intptr_t slide,
+                     const char *symbol, void *replacement) {
+    if (!mh || !symbol || !replacement) return -1;
+
+    symbols_t syms;
+    if (load_symbols(mh, slide, &syms) != 0)
+        return -1;
+
+    int rebound = 0;
+    const uint8_t *cursor = (const uint8_t *)(mh + 1);
+    for (uint32_t i = 0; i < mh->ncmds; i++) {
+        const struct load_command *lc = lc_at(mh, cursor);
+        if (!lc)
+            return -1;
+        cursor += lc->cmdsize;
+        if (lc->cmd != LC_SEGMENT_64)
+            continue;
+
+        const struct segment_command_64 *seg = (const struct segment_command_64 *)lc;
+        uint32_t nsects = 0;
+        const struct section_64 *sect = segment_sections(lc, &nsects);
+        if (!sect)
+            return -1;
+        for (uint32_t j = 0; j < nsects; j++, sect++) {
+            uint32_t type = sect->flags & SECTION_TYPE;
+            if (type != S_LAZY_SYMBOL_POINTERS && type != S_NON_LAZY_SYMBOL_POINTERS)
+                continue;
+
+            void **slots = (void **)((uintptr_t)slide + sect->addr);
+            for (uint64_t k = 0; k < sect->size / sizeof(void *); k++) {
+                const char *name = indirect_symbol_name(&syms,
+                                                        (uint64_t)sect->reserved1 + k);
+                if (!name || strcmp(name, symbol) != 0)
+                    continue;
+
+                // __DATA_CONST is read-only once dyld is done with it.
+                uintptr_t page = (uintptr_t)&slots[k] & ~(uintptr_t)(getpagesize() - 1);
+                if (mprotect((void *)page, (size_t)getpagesize(), PROT_READ | PROT_WRITE) != 0)
+                    continue;
+                slots[k] = replacement;
+                if (strcmp(seg->segname, "__DATA_CONST") == 0)
+                    mprotect((void *)page, (size_t)getpagesize(), PROT_READ);
+                rebound++;
+            }
+        }
+    }
+    return rebound;
 }

@@ -4,6 +4,8 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <pthread.h>
+#include <stdatomic.h>
 
 // Satisfies the log macros without pulling in log.c, which reaches for the
 // support directory this tool has no use for. Drift reasons land on stderr.
@@ -20,6 +22,45 @@ static void wrong(const char *fmt, ...) {
     fputc('\n', stdout);
     va_end(ap);
     g_wrong = 1;
+}
+
+static void *rewrite_fallback(void *arg) {
+    atomic_int *stop = arg;
+    while (!atomic_load(stop))
+        np_webpatch_set_fallback_tool("notproton-fex");
+    return NULL;
+}
+
+static void check_fallback(void) {
+    static const char source[] =
+        "return t?(0,i.jsx)(m.B,{feature:p.OK,label:(0,l.we)"
+        "(\"#Settings_SteamPlay_DefaultTool\"),rgOptions:A,disabled:0==A.length,"
+        "selectedOption:t,onChange:e=>g(e.data)}):null";
+    np_webpatch_set_fallback_tool("notproton-fex");
+    atomic_int stop = 0;
+    pthread_t writer;
+    if (pthread_create(&writer, NULL, rewrite_fallback, &stop) != 0) {
+        wrong("the fallback writer thread did not start");
+        return;
+    }
+    int saved = np_log_level;
+    np_log_level = -1;
+    for (int i = 0; i < 10000; i++) {
+        size_t length = 0;
+        char *out = np_webpatch_transform((const uint8_t *)source, sizeof(source) - 1,
+                                         &length, NULL);
+        int ok = out && !memchr(out, '\0', length)
+            && strstr(out, "A.some(e=>e.data===\"notproton-fex\")")
+            && strstr(out, "selectedOption:t||\"notproton-fex\"");
+        free(out);
+        if (!ok) {
+            wrong("concurrent fallback writes changed a chunk's tool name");
+            break;
+        }
+    }
+    atomic_store(&stop, 1);
+    pthread_join(writer, NULL);
+    np_log_level = saved;
 }
 
 // Invariants the transform relies on but cannot check at run time. A replacement still
@@ -213,7 +254,9 @@ int main(int argc, char **argv) {
     if (argc == 4 && strcmp(argv[1], "--extract") == 0)
         return extract(argv[2], argv[3]);
 
-    if (argc < 2) { selfcheck(); return g_wrong; }
+    if (argc < 2) { selfcheck(); check_fallback(); return g_wrong; }
+
+    np_webpatch_set_fallback_tool("notproton-fex");
 
     for (int i = 1; i < argc; i++) {
         size_t len = 0;

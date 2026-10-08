@@ -3,7 +3,7 @@ import Testing
 
 @testable import NotProtonApp
 
-@Suite("Pointing the current runner")
+@Suite("Cloning a runner")
 struct RunnerInstallerTests {
 
     private func makeRunners() throws -> URL {
@@ -11,57 +11,6 @@ struct RunnerInstallerTests {
             .appending(path: "np-point-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: runners, withIntermediateDirectories: true)
         return runners
-    }
-
-    @Test("The link is relative and in the form the run script expects")
-    func writesRelativeTarget() throws {
-        let runners = try makeRunners()
-        defer { try? FileManager.default.removeItem(at: runners) }
-
-        try RunnerInstaller.pointCurrent(atBuild: "27.0.0.40921", runners: runners)
-
-        let target = try FileManager.default.destinationOfSymbolicLink(
-            atPath: runners.appending(path: "current").path(percentEncoded: false)
-        )
-        #expect(target == "crossover-27.0.0.40921/CrossOver")
-    }
-
-    // Switching builds happens over a link that already exists, and rename is what
-    // makes that a single step rather than an unlink the launch path could land in.
-    @Test("An existing link is replaced")
-    func replacesExistingLink() throws {
-        let runners = try makeRunners()
-        defer { try? FileManager.default.removeItem(at: runners) }
-
-        try RunnerInstaller.pointCurrent(atBuild: "1.0.0.1", runners: runners)
-        try RunnerInstaller.pointCurrent(atBuild: "2.0.0.2", runners: runners)
-
-        let target = try FileManager.default.destinationOfSymbolicLink(
-            atPath: runners.appending(path: "current").path(percentEncoded: false)
-        )
-        #expect(target.hasPrefix("crossover-2.0.0.2/"))
-
-        // No staging file left behind, or the next attempt starts from a dirty state.
-        #expect(!FileManager.default.fileExists(
-            atPath: runners.appending(path: ".current.new").path(percentEncoded: false)
-        ))
-    }
-
-    @Test("A directory in the way is reported instead of being worked around")
-    func refusesDirectoryInTheWay() throws {
-        let runners = try makeRunners()
-        defer { try? FileManager.default.removeItem(at: runners) }
-
-        try FileManager.default.createDirectory(
-            at: runners.appending(path: "current"), withIntermediateDirectories: true
-        )
-
-        #expect(throws: StepFailure.self) {
-            try RunnerInstaller.pointCurrent(atBuild: "1.0.0.1", runners: runners)
-        }
-        #expect(!FileManager.default.fileExists(
-            atPath: runners.appending(path: ".current.new").path(percentEncoded: false)
-        ))
     }
 
     // The clone is found afterwards at a fixed name inside the build directory, so the copy has
@@ -152,8 +101,8 @@ struct RunnerInstallerTests {
         ))
     }
 
-    @Test("Cloning another build leaves the active link alone until setup finishes")
-    func cloneDoesNotActivate() throws {
+    @Test("Cloning another build leaves the first clone in place")
+    func cloneKeepsOtherBuilds() throws {
         let runners = try makeRunners()
         defer { try? FileManager.default.removeItem(at: runners) }
 
@@ -165,11 +114,9 @@ struct RunnerInstallerTests {
         )
 
         _ = try RunnerInstaller.clone(from: first, runners: runners)
-        #expect(RunnerStore.currentBuild(runners: runners) == nil)
-
-        try RunnerInstaller.pointCurrent(atBuild: firstBuild.id, runners: runners)
         _ = try RunnerInstaller.clone(from: second, runners: runners)
-        #expect(RunnerStore.currentBuild(runners: runners) == firstBuild.id)
+        #expect(RunnerInstaller.hasClone(forBuild: firstBuild.bundleVersion, runners: runners))
+        #expect(RunnerInstaller.hasClone(forBuild: "2.0.0.2", runners: runners))
     }
 
     // The first attempt left the build directory holding the payload's contents, not the payload.
@@ -223,26 +170,23 @@ struct RunnerInstallerTests {
     }
 
     // Replacing an intact clone used to remove it before the copy, so a failed copy took a
-    // working 1.2G tree with it and left runners/current dangling, with nothing in the UI.
-    @Test("A failed recopy leaves the working clone and the current link intact")
+    // working 1.2G tree with it, with nothing in the UI.
+    @Test("A failed recopy leaves the working clone intact")
     func keepsWorkingCloneWhenRecopyFails() throws {
         let runners = try makeRunners()
         defer { try? FileManager.default.removeItem(at: runners) }
 
         let (install, build) = try makeSupportedInstall(in: runners)
         _ = try RunnerInstaller.clone(from: install, runners: runners)
-        try RunnerInstaller.pointCurrent(atBuild: build.id, runners: runners)
 
         let payload = SupportPaths
             .clonedRoot(forBuild: build.bundleVersion, runners: runners)
             .appending(path: "lib/wine")
-        let current = runners.appending(path: "current")
         let files = FileManager.default
 
         // Asserted before the failure, or the checks afterwards pass on a clone that was
         // never there to begin with.
         #expect(files.fileExists(atPath: payload.path(percentEncoded: false)))
-        #expect(files.fileExists(atPath: current.path(percentEncoded: false)))
 
         // Removing the source fails the copy the same way running out of room part way
         // through does, which is the case that costs the user a working runner.
@@ -256,11 +200,6 @@ struct RunnerInstallerTests {
             files.fileExists(atPath: payload.path(percentEncoded: false)),
             "a recopy that failed destroyed the working clone"
         )
-        // fileExists resolves the link, so a dangling current reads as absent here.
-        #expect(
-            files.fileExists(atPath: current.path(percentEncoded: false)),
-            "runners/current is dangling, so a launch resolves it to nothing"
-        )
     }
 
     @Test("The state reader agrees with what was just written")
@@ -273,9 +212,8 @@ struct RunnerInstallerTests {
             at: runners.appending(path: "crossover-\(version)/CrossOver/lib/wine"),
             withIntermediateDirectories: true
         )
-        try RunnerInstaller.pointCurrent(atBuild: version, runners: runners)
 
         #expect(RunnerStore.state(runners: runners, verify: { _, _ in [] })
-            == .cloned(build: version, supported: true))
+            == .ready(builds: [version]))
     }
 }

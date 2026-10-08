@@ -38,7 +38,7 @@ const CASES = [
     gone: D3DM, kept: NVEXT },
   // Stripping arguments by name is the kind of thing that takes neighbours with it.
   { to: 'dxvk',
-    from: '-novid MTL_HUD_ENABLED=1 WINEMSYNC=1 NOTPROTON_RETINA=1 ' + UPSCALED + ' %command%',
+    from: 'MTL_HUD_ENABLED=1 WINEMSYNC=1 NOTPROTON_RETINA=1 ' + UPSCALED + ' %command% -novid',
     gone: DXMT,
     kept: ['-novid', 'MTL_HUD_ENABLED=1', 'WINEMSYNC=1', 'NOTPROTON_RETINA=1', '%command%'] },
 ];
@@ -49,7 +49,8 @@ for (const form of Object.keys(FORMS)) {
   const t = runner(form);
   for (const c of CASES) {
     written.length = 0;
-    const nodes = walk(P({ details: details(c.from) }));
+    const from = c.from.includes('%command%') ? c.from : c.from + ' %command%';
+    const nodes = walk(P({ details: details(from) }));
     const backend = nodes.find(x => x.type === 'Dropdown' &&
       (x.props.rgOptions || []).some(o => o.data === 'dxmt'));
     backend.props.onChange({ data: c.to });

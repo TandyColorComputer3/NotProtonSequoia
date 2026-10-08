@@ -6,12 +6,6 @@ import Testing
 @Suite("Mach-O build identity")
 struct MachOBuildTests {
 
-    private func scratch() throws -> URL {
-        let url = URL.temporaryDirectory.appending(path: "np-macho-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
-    }
-
     private func dylib(_ body: String, in work: URL, named name: String) throws -> URL {
         let source = work.appending(path: "\(name).c")
         try Data(body.utf8).write(to: source)
@@ -25,7 +19,7 @@ struct MachOBuildTests {
 
     @Test("Signing a binary does not change which build it is")
     func signingPreservesIdentity() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("macho")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let built = try dylib("int np_probe(void) { return 1; }\n", in: work, named: "probe")
@@ -41,7 +35,7 @@ struct MachOBuildTests {
 
     @Test("Two different builds are told apart")
     func differentBuildsDiffer() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("macho")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let one = try dylib("int np_probe(void) { return 1; }\n", in: work, named: "one")
@@ -52,7 +46,7 @@ struct MachOBuildTests {
 
     @Test("A universal binary is identified by every slice it carries")
     func universalBinaryReportsBothSlices() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("macho")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let source = work.appending(path: "fat.c")
@@ -77,7 +71,7 @@ struct MachOBuildTests {
 
     @Test("Something that is not a binary has no build identity")
     func rubbishHasNoIdentity() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("macho")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let text = work.appending(path: "notes.txt")

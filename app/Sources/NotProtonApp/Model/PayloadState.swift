@@ -31,7 +31,9 @@ struct PayloadState: Sendable {
 
 enum PayloadInspector {
 
-    static func inspect(bridge: URL = SupportPaths.bridge, build: RunnerBuild? = nil) -> PayloadState {
+    static func inspect(
+        bridge: URL = SupportPaths.bridge, builds: [RunnerBuild] = RunnerStore.installedBuilds()
+    ) -> PayloadState {
         let fm = FileManager.default
 
         var expected = 0
@@ -40,7 +42,7 @@ enum PayloadInspector {
 
         do {
             let manifest = try PayloadManifest.bundled()
-            let entries = manifest.entries.filter { applies($0, to: build) }
+            let entries = manifest.entries.flatMap { expand($0, for: builds) }
             expected = entries.count
             missing = entries.filter {
                 !fm.fileExists(atPath: bridge.appending(path: $0.path).path(percentEncoded: false))
@@ -73,13 +75,15 @@ enum PayloadInspector {
         )
     }
 
-    private static func applies(_ entry: PayloadEntry, to build: RunnerBuild?) -> Bool {
-        guard entry.origin == .patched, let build,
+    private static func expand(_ entry: PayloadEntry, for builds: [RunnerBuild]) -> [PayloadEntry] {
+        guard entry.origin == .patched,
               let arch = WineArch.allCases.first(where: {
                   entry.path == "wine/\($0.rawValue)/ntdll.dll"
               })
-        else { return true }
-        return build.patchedNtdll[arch] != nil
+        else { return [entry] }
+        return builds.filter { $0.patchedNtdll[arch] != nil }.map {
+            PayloadEntry(origin: .patched, path: "wine/\($0.id)/\(arch.rawValue)/ntdll.dll")
+        }
     }
 
     static func newestSignatureDatabase(in directory: URL = SupportPaths.signatures) -> String? {

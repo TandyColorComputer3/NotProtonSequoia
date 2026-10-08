@@ -39,11 +39,12 @@ enum Uninstall {
         innerPlist: URL = SupportPaths.Steam.innerInfoPlist,
         updateBlocks: [URL] = UpdateBlock.paths,
         legacyCompat: URL = SupportPaths.Steam.legacyCompat,
-        compatTool: URL = SupportPaths.Steam.compatTool,
+        compatTools: [URL] = SupportPaths.Steam.notprotonTools(),
         directories: [URL] = [
             SupportPaths.support,
             SupportPaths.packageDownloads.deletingLastPathComponent(),
         ],
+        libraries: [SteamLibrary] = PrefixStore.libraries(),
         report: @escaping @Sendable (UninstallPhase) -> Void = { _ in },
         repair: Repair = { report in _ = try await SteamRepair.run(report: report) },
         stop: Stop = { onStopping in try SteamBundle.stopClient(step: step, onStopping: onStopping) }
@@ -63,8 +64,12 @@ enum Uninstall {
 
         report(.removing)
         let removed = try remove(
-            legacyCompat: legacyCompat, compatTool: compatTool, directories: directories
+            legacyCompat: legacyCompat, compatTools: compatTools, directories: directories
         )
+        let templateFailures = RunnerInstaller.removePrefixTemplates(keeping: [], libraries: libraries)
+        if !templateFailures.isEmpty {
+            throw StepFailure(step: step, detail: templateFailures.map(\.detail).joined(separator: "\n"))
+        }
 
         report(.finished)
         return UninstallOutcome(
@@ -106,11 +111,11 @@ enum Uninstall {
         return true
     }
 
-    static func remove(legacyCompat: URL, compatTool: URL, directories: [URL]) throws -> [String] {
+    static func remove(legacyCompat: URL, compatTools: [URL], directories: [URL]) throws -> [String] {
         let files = FileManager.default
         var removed: [String] = []
 
-        for target in [legacyCompat, compatTool] + directories {
+        for target in [legacyCompat] + compatTools + directories {
             let path = target.path(percentEncoded: false)
             guard files.fileExists(atPath: path) else { continue }
             try WriteRefused.catching(path) { try files.removeItem(at: target) }

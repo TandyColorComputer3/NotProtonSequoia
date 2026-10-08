@@ -10,6 +10,8 @@ enum InstallPayload {
         let overlayShim: URL
         let iconmaker: URL
         let appinfo: URL
+        let run: URL
+        let builtAt: Int64
 
         let signatures: [URL]
     }
@@ -35,6 +37,9 @@ enum InstallPayload {
         let shim = root.appending(path: "overlay-shim.dylib")
         let iconmaker = root.appending(path: "iconmaker")
         let appinfo = root.appending(path: "appinfo")
+        let run = root.appending(path: "run")
+        let stamp = try? String(contentsOf: root.appending(path: "build-time"), encoding: .utf8)
+        let builtAt = stamp.flatMap { Int64($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
 
         var missing: [String] = []
         if !files.fileExists(atPath: dylib.path(percentEncoded: false)) {
@@ -49,6 +54,8 @@ enum InstallPayload {
         if !files.fileExists(atPath: appinfo.path(percentEncoded: false)) {
             missing.append("appinfo")
         }
+        if !files.fileExists(atPath: run.path(percentEncoded: false)) { missing.append("run") }
+        if (builtAt ?? 0) <= 0 { missing.append("build-time") }
 
         let signatureDir = root.appending(path: "signatures/macos.arm64")
         let signatures = ((try? files.contentsOfDirectory(
@@ -57,7 +64,7 @@ enum InstallPayload {
 
         if signatures.isEmpty { missing.append("signatures/macos.arm64/*.json") }
 
-        guard missing.isEmpty else {
+        guard missing.isEmpty, let builtAt, builtAt > 0 else {
             throw StepFailure(
                 step: step,
                 detail: "These components are missing: \(missing.joined(separator: ", ")). "
@@ -67,7 +74,7 @@ enum InstallPayload {
 
         return Located(
             dylib: dylib, overlayShim: shim, iconmaker: iconmaker,
-            appinfo: appinfo, signatures: signatures
+            appinfo: appinfo, run: run, builtAt: builtAt, signatures: signatures
         )
     }
 }

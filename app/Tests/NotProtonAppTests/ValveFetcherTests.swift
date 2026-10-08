@@ -15,16 +15,9 @@ private final class PhaseLog: @unchecked Sendable {
 @Suite("Valve fetcher", .serialized)
 struct ValveFetcherTests {
 
-    private func scratchBridge() throws -> URL {
-        let bridge = FileManager.default.temporaryDirectory
-            .appending(path: "np-valve-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: bridge, withIntermediateDirectories: true)
-        return bridge
-    }
-
     @Test("An empty bridge gets all ten files, each matching its pin")
     func fillsAnEmptyBridge() async throws {
-        let bridge = try scratchBridge()
+        let bridge = try scratchDirectory("valve")
         defer { try? FileManager.default.removeItem(at: bridge) }
 
         let manifest = try ValvePackageManifest.bundled()
@@ -65,7 +58,7 @@ struct ValveFetcherTests {
 
     @Test("A bridge that is already correct is left alone")
     func secondRunWritesNothing() async throws {
-        let bridge = try scratchBridge()
+        let bridge = try scratchDirectory("valve")
         defer { try? FileManager.default.removeItem(at: bridge) }
 
         let manifest = try ValvePackageManifest.bundled()
@@ -79,7 +72,7 @@ struct ValveFetcherTests {
 
     @Test("A file that is missing or wrong is replaced, and the rest are not touched")
     func repairsOnlyWhatIsWrong() async throws {
-        let bridge = try scratchBridge()
+        let bridge = try scratchDirectory("valve")
         defer { try? FileManager.default.removeItem(at: bridge) }
 
         let manifest = try ValvePackageManifest.bundled()
@@ -104,7 +97,7 @@ struct ValveFetcherTests {
 
     @Test("A file whose extracted bytes do not match its pin stops the whole install")
     func refusesAFileThatFailsItsPin() async throws {
-        let bridge = try scratchBridge()
+        let bridge = try scratchDirectory("valve")
         defer { try? FileManager.default.removeItem(at: bridge) }
 
         // The package still matches its own pin, so this is the second gate, on the extracted
@@ -136,8 +129,8 @@ struct ValveFetcherTests {
     // a part-way failure is an extract short a file. Out of disk is the real-world shape.
     @Test("A copy that fails part way leaves the previous binary in place")
     func keepsPreviousBinaryWhenACopyFails() throws {
-        let bridge = try scratchBridge()
-        let extracted = try scratchBridge()
+        let bridge = try scratchDirectory("valve")
+        let extracted = try scratchDirectory("valve")
         defer {
             try? FileManager.default.removeItem(at: bridge)
             try? FileManager.default.removeItem(at: extracted)
@@ -200,8 +193,8 @@ struct ValveFetcherTests {
 
     @Test("A package whose bytes do not match its pin is refused, and nothing is installed")
     func refusesAPackageThatFailsItsPin() async throws {
-        let bridge = try scratchBridge()
-        let downloads = try scratchBridge()
+        let bridge = try scratchDirectory("valve")
+        let downloads = try scratchDirectory("valve")
         defer {
             try? FileManager.default.removeItem(at: bridge)
             try? FileManager.default.removeItem(at: downloads)

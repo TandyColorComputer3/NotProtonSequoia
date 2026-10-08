@@ -18,6 +18,10 @@ int main(int argc, char **argv) {
         fputs(NP_CX_OPTIONS_STATEMENT, stdout);
         return 0;
     }
-    fputs("usage: emit component|statement\n", stderr);
+    if (argc == 2 && strcmp(argv[1], "migration") == 0) {
+        fputs(NP_LAUNCH_MIGRATION, stdout);
+        return 0;
+    }
+    fputs("usage: emit component|statement|migration\n", stderr);
     return 2;
 }

@@ -1,4 +1,5 @@
 // CompatManager WebUI service.
+#include <stdlib.h>
 #include <string.h>
 
 #include "compatsvc.h"
@@ -52,9 +53,7 @@
 #define WIRE_VARINT 0
 #define WIRE_BYTES  2
 
-// Per-tool and per-reply size caps, for safety.
 #define TOOL_MAX  512
-#define BODY_MAX  (TOOL_MAX * 8)
 
 // No appid equals the global Steam Play setting, answered with windows.
 #define PLATFORMS_UNSCOPED COMPAT_PLATFORM_WINDOWS
@@ -155,7 +154,7 @@ static int get_compat_tools(uintptr_t request, uintptr_t response) {
 
     const uint8_t *array = *(const uint8_t **)(mgr + COMPAT_MANAGER_TOOL_ARRAY_OFF);
     uint32_t count       = *(const uint32_t *)(mgr + COMPAT_MANAGER_TOOL_COUNT_OFF);
-    if (!array || count > COMPAT_MANAGER_TOOLS_MAX) {
+    if (!array || count > np_compat_manager_tools_max()) {
         NP_ERR("compatsvc: the manager reports %u tool(s) at %p, which is not a list "
                "this reads", count, (const void *)array);
         return RESULT_FAIL;
@@ -195,8 +194,15 @@ static int get_compat_tools(uintptr_t request, uintptr_t response) {
         if (prio > best) best = prio;
     }
 
-    uint8_t  body[BODY_MAX];
-    np_pb_t  w      = { body, sizeof body, 0, 1 };
+    // Every tool plus the none entry and the selected and default names.
+    size_t   room   = ((size_t)count + 3) * TOOL_MAX;
+    uint8_t *body   = malloc(room);
+    if (!body) {
+        NP_ERR("compatsvc: no memory for the reply to app %u", appid);
+        return RESULT_FAIL;
+    }
+    np_pb_t  w      = { body, room, 0, 1 };
+    int      result = RESULT_FAIL;
     uint32_t listed = 0;
 
     for (uint32_t i = 0; i < count; i++) {
@@ -213,7 +219,7 @@ static int get_compat_tools(uintptr_t request, uintptr_t response) {
                 best != 0 && prio != best && prio > 0);
         if (!w.ok) {
             NP_ERR("compatsvc: tool %s does not fit the reply", name);
-            return RESULT_FAIL;
+            goto done;
         }
         listed++;
     }
@@ -224,7 +230,7 @@ static int get_compat_tools(uintptr_t request, uintptr_t response) {
                 holds_none, 0);
         if (!w.ok) {
             NP_ERR("compatsvc: the entry for using no tool does not fit the reply");
-            return RESULT_FAIL;
+            goto done;
         }
         listed++;
     }
@@ -237,19 +243,22 @@ static int get_compat_tools(uintptr_t request, uintptr_t response) {
 
     if (!w.ok) {
         NP_ERR("compatsvc: %u tool(s) do not fit the reply to app %u", listed, appid);
-        return RESULT_FAIL;
+        goto done;
     }
     if (!np_webui_parse_into(response, body, (uint32_t)w.len)) {
         NP_ERR("compatsvc: the client rejected the %zu byte reply built for app %u",
                w.len, appid);
-        return RESULT_FAIL;
+        goto done;
     }
 
     NP_LOG("compatsvc: app %u is offered %u entr(ies) from %u tool(s) on platforms "
            "0x%x, mapped to %s, running under %s, defaulting to %s", appid, listed,
            count, platforms, chosen ? chosen : "no tool",
            active ? active : "no tool", fallback ? fallback : "no tool");
-    return RESULT_OK;
+    result = RESULT_OK;
+done:
+    free(body);
+    return result;
 }
 
 // Reads a protobuf string field.

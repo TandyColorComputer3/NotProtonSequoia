@@ -43,13 +43,24 @@ struct SteamBundleTests {
     private enum Insert {
         case absent
         case own
+        case ownWithoutControllerBlock
         case other(String)
     }
 
-    private func stubBundle(insert: Insert, dylib: Bool) throws -> URL {
-        let app = URL.temporaryDirectory
-            .appending(path: "np-deploy-\(UUID().uuidString)")
-            .appending(path: "Steam.app")
+    private func deployment(
+        insert: Insert, dylib: Bool, version: String?, steam: Bool = true
+    ) throws -> SteamDeployment {
+        let root = URL.temporaryDirectory.appending(path: "np-deploy-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = root.appending(path: "Steam.app")
+        let versionFile = root.appending(path: "dylib.version")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        if let version { try Data("\(version)\n".utf8).write(to: versionFile) }
+        if steam { try stubBundle(app, insert: insert, dylib: dylib) }
+        return SteamBundle.deployment(bundledVersion: "0.2.0", app: app, versionFile: versionFile)
+    }
+
+    private func stubBundle(_ app: URL, insert: Insert, dylib: Bool) throws {
         let macOS = app.appending(path: "Contents/MacOS")
         try FileManager.default.createDirectory(at: macOS, withIntermediateDirectories: true)
 
@@ -58,6 +69,12 @@ struct SteamBundleTests {
         case .absent:
             break
         case .own:
+            let own = SupportPaths.Steam.deployedDylib(inBundle: app)
+            plist[SteamBundle.environmentKey] = [
+                SteamBundle.insertKey: own.path(percentEncoded: false),
+                SteamBundle.controllerBlockKey: SteamBundle.controllerBlockValue,
+            ]
+        case .ownWithoutControllerBlock:
             let own = SupportPaths.Steam.deployedDylib(inBundle: app)
             plist[SteamBundle.environmentKey] = [
                 SteamBundle.insertKey: own.path(percentEncoded: false)
@@ -72,91 +89,56 @@ struct SteamBundleTests {
         if dylib {
             try Data("stand-in\n".utf8).write(to: macOS.appending(path: SupportPaths.dylibName))
         }
-        return app
-    }
-
-    private func versionFile(_ version: String?) throws -> URL {
-        let root = URL.temporaryDirectory.appending(path: "np-version-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let url = root.appending(path: "dylib.version")
-        if let version { try Data("\(version)\n".utf8).write(to: url) }
-        return url
     }
 
     @Test("A bundle patched for this account with a matching version reads as installed")
     func installedForThisAccount() throws {
-        #expect(
-            SteamBundle.deployment(
-                bundledVersion: "0.2.0",
-                app: try stubBundle(insert: .own, dylib: true),
-                versionFile: try versionFile("0.2.0")
-            ) == .installed(version: "0.2.0")
-        )
+        #expect(try deployment(insert: .own, dylib: true, version: "0.2.0") == .installed(version: "0.2.0"))
     }
 
     @Test("A bundle patched by another account reports no version rather than a clean install")
     func patchedByAnotherAccount() throws {
-        #expect(
-            SteamBundle.deployment(
-                bundledVersion: "0.2.0",
-                app: try stubBundle(insert: .own, dylib: true),
-                versionFile: try versionFile(nil)
-            ) == .installed(version: nil)
-        )
+        #expect(try deployment(insert: .own, dylib: true, version: nil) == .installed(version: nil))
     }
 
     @Test("A plist naming a dylib that is not there reads as not installed")
     func namedDylibMissing() throws {
-        #expect(
-            SteamBundle.deployment(
-                bundledVersion: "0.2.0",
-                app: try stubBundle(insert: .own, dylib: false),
-                versionFile: try versionFile("0.2.0")
-            ) == .notInstalled
-        )
+        #expect(try deployment(insert: .own, dylib: false, version: "0.2.0") == .notInstalled)
     }
 
     @Test("An older recorded version reads as outdated")
     func outdatedVersion() throws {
         #expect(
-            SteamBundle.deployment(
-                bundledVersion: "0.2.0",
-                app: try stubBundle(insert: .own, dylib: true),
-                versionFile: try versionFile("0.1.0")
-            ) == .outdated(deployed: "0.1.0", bundled: "0.2.0")
+            try deployment(insert: .own, dylib: true, version: "0.1.0")
+                == .outdated(deployed: "0.1.0", bundled: "0.2.0")
+        )
+    }
+
+    @Test("A bundle patched before the controller block reads as outdated")
+    func missingControllerBlock() throws {
+        #expect(
+            try deployment(insert: .ownWithoutControllerBlock, dylib: true, version: "0.2.0")
+                == .outdated(deployed: "0.2.0", bundled: "0.2.0")
         )
     }
 
     @Test("Somebody else's insert is left alone")
     func foreignInsert() throws {
         #expect(
-            SteamBundle.deployment(
-                bundledVersion: "0.2.0",
-                app: try stubBundle(insert: .other("/opt/other/thing.dylib"), dylib: true),
-                versionFile: try versionFile(nil)
-            ) == .foreign(insert: "/opt/other/thing.dylib")
+            try deployment(insert: .other("/opt/other/thing.dylib"), dylib: true, version: nil)
+                == .foreign(insert: "/opt/other/thing.dylib")
         )
     }
 
     @Test("An unpatched bundle reads as not installed")
     func unpatched() throws {
-        #expect(
-            SteamBundle.deployment(
-                bundledVersion: "0.2.0",
-                app: try stubBundle(insert: .absent, dylib: false),
-                versionFile: try versionFile(nil)
-            ) == .notInstalled
-        )
+        #expect(try deployment(insert: .absent, dylib: false, version: nil) == .notInstalled)
     }
 
     @Test("A missing bundle reads as Steam missing")
     func steamMissing() throws {
         #expect(
-            SteamBundle.deployment(
-                bundledVersion: "0.2.0",
-                app: URL.temporaryDirectory.appending(path: "np-absent-\(UUID().uuidString).app"),
-                versionFile: try versionFile("0.2.0")
-            ) == .steamMissing
+            try deployment(insert: .absent, dylib: false, version: "0.2.0", steam: false) == .steamMissing
         )
     }
 }

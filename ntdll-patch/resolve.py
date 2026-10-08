@@ -14,7 +14,7 @@ PINNED = {
     '04c7200b6645decb7c2d1ba6b0195abc9af83257072558d11aa72cc067ac3377':
         {'hookRVA': 0x51f15, 'stolen': '4883bc24f000000000', 'caveRVA': 0x80be0, 'wm': 'rsi',
          'resume': 0x51f1e, 'load_path': 0xd0,
-         'payload': '4ce2ddc11c433fe15f78633fc5c1fda8b27fa642426cb26378f7d7d7b54a79f8',
+         'payload': '8504714bba0195439cb5b44c89f25c68dbb7f01bae6f72ca0a258a0daec3e244',
          'exports': {'LdrGetDllHandle': 0x1700176d0, 'LdrLoadDll': 0x1700181f0,
                      'NtProtectVirtualMemory': 0x17000f640}},
     '94cc7c14c1e9dcf58ef501015c115f8405c73b2a65cefe31faa5d9e47f36e58b':
@@ -24,6 +24,12 @@ PINNED = {
          'exports': {'LdrGetDllHandle': 0x7bc125b0, 'LdrLoadDll': 0x7bc130a0,
                      'NtProtectVirtualMemory': 0x7bc0d764, 'NtOpenFile': 0x7bc0d594,
                      'NtReadFile': 0x7bc0d2c4, 'NtClose': 0x7bc0d354}},
+    'f4fa556a3dc20f6e966a803f5de554359227a61a24cd5b5a2ad88a427ceeec58':
+        {'hookRVA': 0x34b2e, 'stolen': '488b842410010000', 'caveRVA': 0x79394, 'wm': 'rbx',
+         'resume': 0x34b36, 'load_path': 0x98,
+         'payload': '6af3f36658907cc94c096e432006807d6997bd970560f2579df748d6fd6e2bc6',
+         'exports': {'LdrGetDllHandle': 0x17002f530, 'LdrLoadDll': 0x17002ce70,
+                     'NtProtectVirtualMemory': 0x17005549c}},
     '09474795d6f306163cebab6429819999fcff50e07dbc4b067a90ec4f74a3a7d7':
         {'hookRVA': 0x2ee12, 'stolen': '8b4514a802', 'caveRVA': 0x6b2fe, 'caveSize': 3330,
          'resume': 0x2ee17, 'wm': 'esi', 'load_path': -0x3c,
@@ -31,6 +37,19 @@ PINNED = {
          'exports': {'LdrGetDllHandle': 0x7bc2a6b0, 'LdrLoadDll': 0x7bc286d0,
                      'NtProtectVirtualMemory': 0x7bc4d020, 'NtOpenFile': 0x7bc4ce50,
                      'NtReadFile': 0x7bc4cb80, 'NtClose': 0x7bc4cc10}},
+    '6dff64c00793ce92124f1316985c63783f539f26b392975c70f57637458d2387':
+        {'hookRVA': 0x44972, 'stolen': '4883bc24f000000000', 'caveRVA': 0xae000, 'caveSize': 4096,
+         'wm': 'r14', 'resume': 0x4497b, 'load_path': 0xd0,
+         'payload': 'e35b834408599c45f30b23a6d2bf38acfa5c3df4d15206617c471e23a4a01bfb',
+         'exports': {'LdrGetDllHandle': 0x170014bc0, 'LdrLoadDll': 0x170015680,
+                     'NtProtectVirtualMemory': 0x17000f380}},
+    '2c60ee6b00dd13b7f6cb11017778a041ba6a321eaea194f1fa0dca7eab8403e2':
+        {'hookRVA': 0x43b40, 'stolen': 'f645c0017526', 'caveRVA': 0xaa000, 'caveSize': 4096,
+         'resume': 0x43b46, 'wm': 'esi', 'load_path': -0x54,
+         'payload': 'be465bc936cafafae4aa1b4c41f668e08848492d9858c2cf2ad483a9f1ab25e5',
+         'exports': {'LdrGetDllHandle': 0x7bc12c60, 'LdrLoadDll': 0x7bc13750,
+                     'NtProtectVirtualMemory': 0x7bc0d584, 'NtOpenFile': 0x7bc0d3b4,
+                     'NtReadFile': 0x7bc0d0e4, 'NtClose': 0x7bc0d174}},
     '7823d71fbce6c9947163bf8b96beb299eabb02878245bcaf6759f2a22e81f071':
         {'caveRVA': 0xf1185, 'caveSize': 61051,
          # This image carries the loader twice, once for the native side and once for the
@@ -44,13 +63,13 @@ PINNED = {
          # exported NtProtectVirtualMemory is a syscall thunk whose dispatcher is null.
          'guest': {'LdrLoadDll': 0x9f698, 'LdrGetDllHandle': 0x9f698,
                    'NtProtectVirtualMemory': 0xea8cc},
-         'payload': 'bee4ee13c235bd5de3cb6ce840b9695effd5623132f6dc0d137496d6a5330f5e',
+         'payload': '68a458ec9c32041c79fdd622d18e91cfbe825a5292cae362d310930e34dd598e',
          'exports': {'LdrGetDllHandle': 0x180043328, 'LdrLoadDll': 0x180040e94,
                      'NtProtectVirtualMemory': 0x180065db0}},
     '5b388fd48823e905616432fba627eb48f68dc14383963bb213d55db3f691b1b9':
         {'hookRVA': 0x52055, 'stolen': '4883bc24f000000000', 'caveRVA': 0x815e0, 'caveSize': 2592,
          'resume': 0x5205e, 'wm': 'rsi', 'load_path': 0xd0,
-         'payload': '67b70667387ff5bf89743b2d0a995a94543812678d4558dc884e6cebb46e7750',
+         'payload': '660ea7c935620e620a45a46e552c0a3de9292e031bf93ef676968154d45e78d5',
          'exports': {'LdrGetDllHandle': 0x170017710, 'LdrLoadDll': 0x170018230,
                      'NtProtectVirtualMemory': 0x17000f690, 'NtOpenFile': 0x17000f2f0,
                      'NtReadFile': 0x17000ed50, 'NtClose': 0x17000ee70}},
@@ -61,6 +80,13 @@ PINNED = {
          'exports': {'LdrGetDllHandle': 0x7bc125f0, 'LdrLoadDll': 0x7bc130e0,
                      'NtProtectVirtualMemory': 0x7bc0d7a4, 'NtOpenFile': 0x7bc0d5d4,
                      'NtReadFile': 0x7bc0d304, 'NtClose': 0x7bc0d394}},
+    '1b02dcf6ad9d9490870f1127a421c4c0d1471c65ec1574e1e84c05d69801ac7e':
+        {'hookRVA': 0x34aae, 'stolen': '488b842410010000', 'caveRVA': 0xb5000, 'caveSize': 4096,
+         'resume': 0x34ab6, 'wm': 'rbx', 'load_path': 0x98,
+         'payload': '0084bba1d7399e749d918dba4f313f1dc1825d2a487f3169b469b57c5b161ca5',
+         'exports': {'LdrGetDllHandle': 0x17002f4e0, 'LdrLoadDll': 0x17002ce20,
+                     'NtProtectVirtualMemory': 0x170055dbc, 'NtOpenFile': 0x170055a1c,
+                     'NtReadFile': 0x17005547c, 'NtClose': 0x17005559c}},
     '66b1a244a611795c59a93a9491d17f36c98cd8db9be495004a37864e0e5ed4a5':
         {'hookRVA': 0x2ede2, 'stolen': '8b4514a802', 'caveRVA': 0xa4000, 'caveSize': 4096,
          'resume': 0x2ede7, 'wm': 'esi', 'load_path': -0x3c,
@@ -76,7 +102,7 @@ PINNED = {
                     'wm': 'x22', 'load_path': -0x88}],
          'guest': {'LdrLoadDll': 0xa0aa0, 'LdrGetDllHandle': 0xa0aa0,
                    'NtProtectVirtualMemory': 0xecf9c},
-         'payload': 'c6060b07f2c2f25636fcb1489ddd6729c277666167e9a090f55a1b711f0d5979',
+         'payload': 'b27484eaed592366ddd3a5b3c565c2dc05e8fa255fbd7e19d9d8eb619ff57c23',
          'exports': {'LdrGetDllHandle': 0x18004390c, 'LdrLoadDll': 0x180041344,
                      'NtProtectVirtualMemory': 0x180067050, 'NtOpenFile': 0x180066cb0,
                      'NtReadFile': 0x180066710, 'NtClose': 0x180066830}},
@@ -177,6 +203,8 @@ class PE:
                 'placement': 'padding'}
 
     def appended(self):
+        # The section is mapped at SizeOfImage, and its raw data goes after everything else in
+        # the file, the certificate included.
         if self.table_end + 40 > self.size_of_headers or any(self.d[self.table_end:self.table_end + 40]):
             raise SystemExit(f"{self.path}: no free section header slot after the table")
         raw = (len(self.d) + self.file_align - 1) & ~(self.file_align - 1)
@@ -324,13 +352,14 @@ def resolve_i386(pe):
         raise SystemExit(f"{pe.path}: no MODREF flag test in build_module")
     wm = re.search(r'\[(e\w\w) \+ 0x37\]', body[anchor].op_str).group(1)
 
-    # The module flags are tested for bit 2 just above. Either the value is still in memory
-    # or the compiler loaded it first, in which case that load starts the hook.
+    # The module flags are tested just above, with bit 2 in Wine 11.15 and bit 1 in 11.0.
+    # Either the value is still in memory or the compiler loaded it first, in which case that
+    # load starts the hook.
     gate = None
     for k in range(anchor - 1, max(anchor - 24, 0), -1):
         i = body[k]
         if i.mnemonic == 'test' and i.operands and i.operands[-1].type == X86.X86_OP_IMM \
-                and i.operands[-1].imm == 2:
+                and i.operands[-1].imm in (1, 2):
             gate = k
             break
     if gate is None:
@@ -386,7 +415,7 @@ def resolve_i386(pe):
             'insn': ' ; '.join(f"{i.mnemonic} {i.op_str}" for i in taken),
             'load_path': load_path, 'skip': skip, 'stole_branch': stole_branch,
             'stolen_head': b''.join(i.bytes for i in (taken[:-1] if stole_branch else taken)).hex(),
-            'flags_slot': flags_slot}
+            'flags_slot': flags_slot, 'flags_bit': body[gate].operands[-1].imm}
 
 
 def aarch64_walk(md, text, tv):
@@ -716,6 +745,7 @@ def shell_vars(path):
         out['NP_STOLEN_HEAD_BYTES'] = ','.join(
             f"0x{b:02x}" for b in bytes.fromhex(r['stolen_head']))
         out['NP_FLAGS_SLOT'] = ('%#x' if r['flags_slot'] >= 0 else '-%#x') % abs(r['flags_slot'])
+        out['NP_FLAGS_BIT'] = f"{r['flags_bit']:#x}"
 
     for n, s in enumerate(r.get('sites') or [], 1):
         out[f'NP_HOOK_RVA_{n}'] = f"{s['hookRVA']:#x}"
