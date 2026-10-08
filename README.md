@@ -46,4 +46,8 @@ documentation is quite sparse. Sorry about that, I'll improve it shortly.
 
 Please read NOTICE for license information.
 
+Fork development: TandyColorComputer3, with AI assistance from OpenAI Codex on
+upstream 1.0.3 integration, Sequoia compatibility changes, UI adjustments,
+regression testing, documentation, and release preparation.
+
 Please open issue reports with any issues. PRs are welcome and encouraged. Contributions policy to come shortly.
