@@ -20,9 +20,3 @@ steam-helper from Proton 9. ntdll-patch patches the copy of CrossOver that the a
 makes/places in the ```~/Library/Application Support/notproton/runners/``` folder so that
 lsteamclient is loaded.
 
-This release is coming several days past when I wanted to release it, so the
-documentation is quite sparse. Sorry about that, I'll improve it shortly.
-
-Please read NOTICE for license information.
-
-Please open issue reports with any issues. PRs are welcome and encouraged. Contributions policy to come shortly.
