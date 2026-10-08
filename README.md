@@ -1,5 +1,10 @@
 # NotProton
 
+> **Save-data warning:** Prefix creation/rebuilding and Steam Cloud save synchronization
+> have not been fully tested on Sequoia. Incorrect save paths or newly created saves
+> could overwrite existing progress locally or in Steam Cloud. Back up your saves
+> independently before testing; Steam Cloud is not a backup.
+
 NotProton enables the Steam Play experience from Linux Steam in the macOS Steam client.
 
 This is done by forcibly enabling the Steam Play functionality in macOS Steam (which is
