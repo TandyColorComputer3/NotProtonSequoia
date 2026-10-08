@@ -14,14 +14,7 @@ enum RunnerPatcher {
     ]
 
     static func builtins(in root: URL) -> [(arch: String, name: String)] {
-        let unixArches = Set(
-            unixLoaders(in: root).compactMap { loader in
-                loader.pathComponents.last { $0.hasSuffix("-unix") }
-            }
-        ).sorted()
-
-        return windowsBuiltins
-            + unixArches.map { (arch: $0, name: "lsteamclient.so") }
+        windowsBuiltins + [(arch: unixArch(in: root), name: "lsteamclient.so")]
     }
 
     static func unixArch(in root: URL) -> String {

@@ -233,8 +233,18 @@ func group(for element: Element) -> [String: Any] {
     ]
 }
 
+if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--legacy-png" {
+    let output = URL(fileURLWithPath: CommandLine.arguments[2])
+    let all = render(Element.allCases)
+    let ink = inkBounds(all)
+    try write(normalized(all, sharedInk: ink), to: output)
+    exit(0)
+}
+
 guard CommandLine.arguments.count == 2 else {
-    FileHandle.standardError.write("usage: icon <output.icon>\n".data(using: .utf8)!)
+    FileHandle.standardError.write(
+        "usage: icon <output.icon> | icon --legacy-png <output.png>\n".data(using: .utf8)!
+    )
     exit(2)
 }
 

@@ -39,12 +39,7 @@ struct BackupsView: View {
             }
         }
         .toolbar {
-            if #available(macOS 26.1, *) {
-                ToolbarItemGroup(placement: .primaryAction) { strip }
-                    .visibilityPriority(.high)
-            } else {
-                ToolbarItemGroup(placement: .primaryAction) { strip }
-            }
+            ToolbarItemGroup(placement: .primaryAction) { strip }
         }
         .task { if model.prefixes.isEmpty { await model.load() } }
         .onChange(of: model.backups) { _, kept in

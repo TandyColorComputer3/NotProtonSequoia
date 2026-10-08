@@ -23,12 +23,16 @@ SRCS := \
 	dylib/core/loader.c \
 	dylib/core/macho.c \
 	dylib/resolver/anchor.c \
+	dylib/resolver/aob.c \
 	dylib/resolver/resolver.c \
 	dylib/resolver/sigdb.c \
 	dylib/util/log.c \
 	dylib/util/file.c \
+	dylib/util/peicon.c \
 	dylib/hooks/hooks.c \
 	dylib/hooks/hook_compat.c \
+	dylib/hooks/hook_shortcut.c \
+	dylib/hooks/hook_icon.c \
 	dylib/hooks/hook_webui.c \
 	dylib/hooks/hook_webpatch.c \
 	dylib/hooks/hook_spawn.c \
@@ -226,7 +230,7 @@ APP_TESTS := app/Tests
 
 app-tests:
 	@if [ ! -d $(APP_TESTS) ]; then $(call SKIP,app-tests,$(APP_TESTS)); exit 0; fi; \
-	touch app/Package.swift; cd app && swift test
+	touch app/Package.swift; cd app && swift test --no-parallel
 
 PANEL_TESTS := dylib/tests/panel-behavior
 
@@ -348,9 +352,11 @@ ICONMAKER := $(OUT_DIR)/iconmaker
 
 iconmaker: $(ICONMAKER)
 
-$(ICONMAKER): helpers/iconmaker.swift
+$(ICONMAKER): helpers/iconmaker.swift dylib/util/peicon.c dylib/util/peicon.h
 	@mkdir -p $(OUT_DIR)
-	swiftc -O -framework AppKit -o $@ $<
+	$(CC) -c -O2 -Wall -Wextra -o $(OUT_DIR)/peicon-host.o dylib/util/peicon.c
+	swiftc -O -framework AppKit -import-objc-header dylib/util/peicon.h \
+		-o $@ helpers/iconmaker.swift $(OUT_DIR)/peicon-host.o
 	@echo "==> Built $@"
 
 APPINFO := $(OUT_DIR)/appinfo
@@ -442,7 +448,7 @@ app-payload: $(TARGET) $(OVERLAY_SHIM) $(ICONMAKER) $(APPINFO)
 	@echo "==> Staged app payload in $(APP_PAYLOAD)"
 
 APP_BUNDLE  := $(OUT_DIR)/NotProton.app
-APP_BUNDLE_PAYLOAD := $(APP_BUNDLE)/Contents/Resources/NotProtonApp_NotProtonApp.bundle/Contents/Resources/payload
+APP_BUNDLE_PAYLOAD := $(APP_BUNDLE)/Contents/Resources/NotProtonApp_NotProtonApp.bundle/payload
 APP_ZIP     := $(OUT_DIR)/NotProton.zip
 APP_VERSION := $(shell sed -n 's/^\#define NOTPROTON_VERSION "\(.*\)"/\1/p' dylib/version.h)
 
@@ -465,11 +471,11 @@ $(ICON_CAR): $(ICONGEN)
 	$(ICONGEN) "$(ICON_DOC)"
 	@mkdir -p "$(ICON_DIR)"
 	xcrun actool "$(ICON_DOC)" --compile "$(ICON_DIR)" --platform macosx \
-		--minimum-deployment-target 26.0 --app-icon NotProton \
+		--minimum-deployment-target $(MIN_VER) --app-icon NotProton \
 		--output-partial-info-plist "$(ICON_DIR)/partial.plist" >/dev/null
 	@echo "==> Built $@"
 
-app: app-payload $(ICON_CAR)
+app: app-payload
 	swift build --package-path app -c release
 	rm -rf "$(APP_BUNDLE)"
 	@mkdir -p "$(APP_BUNDLE)/Contents/MacOS" "$(APP_BUNDLE)/Contents/Resources"
@@ -487,7 +493,7 @@ app: app-payload $(ICON_CAR)
 		"$(APP_BUNDLE)/Contents/MacOS/NotProtonApp"
 	cp -R "$$(swift build --package-path app -c release --show-bin-path)/NotProtonApp_NotProtonApp.bundle" \
 		"$(APP_BUNDLE)/Contents/Resources/"
-	cp "$(ICON_DIR)/Assets.car" "$(ICON_DIR)/NotProton.icns" \
+	cp "$(OUT_DIR)/NotProton.icns" \
 		"$(APP_BUNDLE)/Contents/Resources/"
 	@missing=$$(cd "$(APP_PAYLOAD)" && find . -type f ! -name '.DS_Store' | sed 's|^\./||' \
 		| while read -r rel; do \

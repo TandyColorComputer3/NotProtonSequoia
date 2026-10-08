@@ -61,19 +61,25 @@ enum PrefixTools {
             fm.isExecutableFile(atPath: url.path(percentEncoded: false))
         }
 
-        let arm = runner.appending(path: "lib/wine/aarch64-unix")
-        let armLoader = arm.appending(path: "wine.app/Contents/MacOS/wine")
-        let armServer = hosted.appending(path: "wineserver-arm64")
-        if executable(armLoader), executable(armServer) {
-            return WineLayout(loader: armLoader, server: armServer, unixDir: arm)
+        // A normal win64 CrossOver bottle uses the x86_64 Unix Wine
+        // loader and wineserver-x86.  Do not select the FEX/ARM64 host
+        // merely because the Preview runtime contains aarch64-unix.
+        let unix = runner.appending(path: "lib/wine/x86_64-unix")
+        let x86Loader = unix.appending(path: "wine")
+        let x86Server = hosted.appending(path: "wineserver-x86")
+        if executable(x86Loader), executable(x86Server) {
+            return WineLayout(
+                loader: x86Loader,
+                server: x86Server,
+                unixDir: unix
+            )
         }
 
-        let unix = runner.appending(path: "lib/wine/x86_64-unix")
-        let server = hosted.appending(path: "wineserver")
+        let arm = runner.appending(path: "lib/wine/aarch64-unix")
         return WineLayout(
-            loader: unix.appending(path: "wine"),
-            server: executable(server) ? server : hosted.appending(path: "wineserver-x86"),
-            unixDir: unix
+            loader: arm.appending(path: "wine.app/Contents/MacOS/wine"),
+            server: hosted.appending(path: "wineserver-arm64"),
+            unixDir: arm
         )
     }
 
