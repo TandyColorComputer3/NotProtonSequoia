@@ -318,10 +318,10 @@ struct StatusView: View {
 
             Section("Steam") {
                 steamRow(snapshot.steam, payload: snapshot.payload)
-                if snapshot.steamRunning {
+                if snapshot.steamRunning && setupIsIncomplete(snapshot) {
                     StatusRow(
                         title: "Steam is running",
-                        value: "Close Steam before continuing.",
+                        value: "NotProton will close Steam automatically if an update needs it.",
                         tone: .info
                     )
                 }
@@ -354,6 +354,18 @@ struct StatusView: View {
             dangerSection
         }
         .formStyle(.grouped)
+    }
+
+    private func setupIsIncomplete(_ snapshot: StatusSnapshot) -> Bool {
+        let steamCurrent: Bool
+        if case .installed(let version) = snapshot.steam {
+            steamCurrent = version == AppVersion.bundled
+                && (snapshot.installContent == .current || snapshot.installContent == .unchecked)
+        } else {
+            steamCurrent = false
+        }
+        let runnerReady = if case .ready = snapshot.runner { true } else { false }
+        return !steamCurrent || !runnerReady || !snapshot.payload.isComplete
     }
 
     private var dangerSection: some View {

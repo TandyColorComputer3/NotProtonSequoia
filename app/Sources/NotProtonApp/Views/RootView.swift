@@ -26,6 +26,7 @@ enum Pane: String, CaseIterable, Identifiable, Hashable {
 
 struct RootView: View {
 
+    @Environment(SystemStatus.self) private var status
     @Binding var pane: Pane
 
     var body: some View {
@@ -49,6 +50,23 @@ struct RootView: View {
             case .status: StatusView()
             case .prefixes: PrefixesView()
             case .backups: BackupsView()
+            }
+        }
+        .task { await watchSteam() }
+    }
+
+    private func watchSteam() async {
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(for: .seconds(2))
+            } catch {
+                return
+            }
+            let running = await Task.detached(priority: .utility) {
+                SteamBundle.isRunning
+            }.value
+            if status.snapshot?.steamRunning != running {
+                status.snapshot?.steamRunning = running
             }
         }
     }
