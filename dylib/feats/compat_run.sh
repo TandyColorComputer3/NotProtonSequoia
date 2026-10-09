@@ -148,6 +148,48 @@ alert_safe() {
   printf '%s' "$1" | tr -d '"\\'
 }
 
+# Wine refuses to start when its per-user socket root can be searched by another user. A
+# third-party Wine process (or an older setup) can leave this shared directory at 0755, which
+# prevents both Steam's prerequisite helper and the game from starting. Repair only a real
+# directory owned by this account; never follow a link or take over somebody else's path.
+secure_wine_server_root() {
+  server_root=$1
+  server_uid=$2
+
+  if [ -L "$server_root" ]; then
+    echo "=== unsafe Wine server root is a symbolic link: $server_root ===" >> "$log" 2>&1 || true
+    return 1
+  fi
+  if [ ! -e "$server_root" ]; then
+    (umask 077 && mkdir "$server_root") >> "$log" 2>&1 || true
+  fi
+  if [ ! -d "$server_root" ] || [ -L "$server_root" ]; then
+    echo "=== Wine server root is not a private directory: $server_root ===" >> "$log" 2>&1 || true
+    return 1
+  fi
+
+  server_owner=$(stat -f %u "$server_root" 2>/dev/null) || server_owner=""
+  if [ "$server_owner" != "$server_uid" ]; then
+    echo "=== Wine server root belongs to uid ${server_owner:-unknown}, not $server_uid: $server_root ===" >> "$log" 2>&1 || true
+    return 1
+  fi
+
+  server_mode=$(stat -f %Lp "$server_root" 2>/dev/null) || server_mode=""
+  if [ "$server_mode" != 700 ]; then
+    chmod 700 "$server_root" >> "$log" 2>&1 || return 1
+    echo "=== repaired Wine server root permissions from ${server_mode:-unknown} to 700 ===" >> "$log" 2>&1 || true
+  fi
+  [ "$(stat -f %Lp "$server_root" 2>/dev/null)" = 700 ]
+}
+
+stage_step="Wine server security"
+wine_uid=$(id -u) || exit 1
+wine_server_root="/tmp/.wine-$wine_uid"
+if ! secure_wine_server_root "$wine_server_root" "$wine_uid"; then
+  show_alert "Wine cannot start safely" "NotProton could not secure Wine's temporary server directory. Restart your Mac and try again. If this continues, inspect this game's notproton-run.log."
+  exit 1
+fi
+
 refuse_foreign_prefix() {
   case "${wine_unix##*/}" in
     aarch64-unix) want=aa64 ;;
