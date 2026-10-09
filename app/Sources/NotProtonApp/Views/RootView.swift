@@ -178,7 +178,7 @@ private struct SetupGuide: View {
                     isCurrent: steamReady && crossOverReady && toolReady,
                     button: toolReady ? "Open Steam" : nil,
                     isEnabled: toolReady
-                ) { NSWorkspace.shared.open(SupportPaths.Steam.app) }
+                ) { SteamLauncher.open() }
             }
             .padding(12)
         }
