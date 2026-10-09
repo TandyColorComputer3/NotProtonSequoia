@@ -3,9 +3,9 @@
 import Foundation
 
 enum AppResources {
-    static func url(forResource resource: String, withExtension extension_: String) -> URL? {
+    static func url(forResource resource: String, withExtension extension_: String?) -> URL? {
         let name = "NotProtonApp_NotProtonApp.bundle"
-        let file = "\(resource).\(extension_)"
+        let file = extension_.map { "\(resource).\($0)" } ?? resource
 
         // SwiftPM 6.1's generated Bundle.module accessor looks only beside
         // Contents, which is not a valid location in a signed macOS app.
@@ -25,6 +25,13 @@ enum AppResources {
         let adjacent = Bundle.main.bundleURL.appending(path: name).appending(path: file)
         if FileManager.default.isReadableFile(atPath: adjacent.path(percentEncoded: false)) {
             return adjacent
+        }
+
+        // Do not evaluate Bundle.module in an application bundle. Its generated
+        // accessor traps when it cannot find the SwiftPM resource bundle, which
+        // turns a missing-resource error into an unrecoverable SIGTRAP.
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            return nil
         }
 
         // SwiftPM test and command-line builds use its generated build-tree

@@ -16,8 +16,10 @@ enum InstallPayload {
         let signatures: [URL]
     }
 
-    static func root(in bundle: Bundle = .module) throws -> URL {
-        guard let url = bundle.url(forResource: "payload", withExtension: nil) else {
+    static func root(in bundle: Bundle? = nil) throws -> URL {
+        let url = bundle?.url(forResource: "payload", withExtension: nil)
+            ?? AppResources.url(forResource: "payload", withExtension: nil)
+        guard let url else {
             throw StepFailure(
                 step: step,
                 detail: "This build of NotProton carries no components at all."
@@ -26,7 +28,7 @@ enum InstallPayload {
         return url
     }
 
-    static func locate(in bundle: Bundle = .module) throws -> Located {
+    static func locate(in bundle: Bundle? = nil) throws -> Located {
         try locate(root: try root(in: bundle))
     }
 
